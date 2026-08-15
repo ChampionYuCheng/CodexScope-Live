@@ -1,0 +1,12 @@
+[package]
+name = "codexscope-live"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "codexscope_live"
+path = "src/lib.rs"
+
+[[bin]]
+name = "codexscope-live"
+path = "src/main.rs"

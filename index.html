@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CodexScope</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 2.5 20.2 7v9.2L12 21 3.8 16.2V7L12 2.5Z" fill="currentColor" opacity=".25"/>
+            <path d="M12 3.5 19 7.4v7.9l-7 4.1-7-4.1V7.4l7-3.9Z" fill="#fff"/>
+            <path d="M12 3.5 19 7.4l-7 4.2-7-4.2 7-3.9Z" fill="#1668f2"/>
+          </svg>
+        </span>
+        <span>CodexScope</span>
+      </div>
+
+      <nav class="tabs" aria-label="主导航">
+        <button class="tab active" type="button" data-scroll-target="overview">总览</button>
+        <button class="tab" type="button" data-scroll-target="quotaPanel">额度</button>
+        <button class="tab" type="button" data-scroll-target="tokenPanel">Token</button>
+        <button class="tab" type="button" data-scroll-target="sessionPanel">会话</button>
+        <button class="tab" type="button" data-scroll-target="modelPanel">模型</button>
+        <button class="tab" type="button" data-scroll-target="quotaPanel">速率</button>
+      </nav>
+
+      <div class="actions">
+        <div class="sources" aria-label="Codex 数据来源">
+          <span class="source-chip primary" id="sourcePrimary">Codex 桌面端</span>
+          <span class="source-chip" id="sourceSecondary">本地日志</span>
+          <span class="source-chip" id="sourceTertiary">额度状态</span>
+        </div>
+        <div class="live-controls" aria-label="实时刷新控制">
+          <span id="liveStatus" class="live-status static" aria-live="polite"><i></i><span id="liveStatusText">静态预览</span></span>
+          <button id="liveToggle" class="live-button" type="button">启用实时</button>
+          <button id="manualRefresh" class="live-button" type="button">刷新</button>
+        </div>
+        <div class="date-filter" id="dateFilter" aria-label="日期筛选">
+          <button class="period-btn" type="button" data-range="24h">近24小时</button>
+          <button class="period-btn active" type="button" data-range="today">今天</button>
+          <button class="period-btn" type="button" data-range="7">7天内</button>
+          <button class="period-btn" type="button" data-range="30">30天内</button>
+          <button class="period-btn" type="button" data-range="history">历史</button>
+          <button class="period-btn" type="button" data-range="custom">自定义</button>
+          <div id="customRange" class="custom-range" hidden>
+            <input id="startDate" type="date" aria-label="开始日期">
+            <span>至</span>
+            <input id="endDate" type="date" aria-label="结束日期">
+          </div>
+        </div>
+        <div class="sync">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/>
+            <path d="m8 12 2.4 2.4L16 8.8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span id="syncText">-- 已同步</span>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section id="overview" class="grid" aria-label="Codex 用量总览">
+        <article id="tokenPanel" class="panel">
+          <div class="panel-title">
+            <div class="trend-heading">
+              <h2>Token 消耗趋势 <span class="hint">i</span></h2>
+              <div id="chartMeta" class="forecast">累计 --</div>
+            </div>
+            <div class="chart-actions">
+              <div class="trend-toggle" role="group" aria-label="趋势统计方式">
+                <button class="trend-mode active" type="button" data-trend-mode="cumulative">累计</button>
+                <button class="trend-mode" type="button" data-trend-mode="interval">分时</button>
+              </div>
+              <div class="trend-toggle" role="group" aria-label="趋势尺度">
+                <button class="trend-scale active" type="button" data-trend-scale="linear">绝对</button>
+                <button class="trend-scale" type="button" data-trend-scale="log">对数</button>
+              </div>
+            </div>
+          </div>
+          <div class="legend" aria-label="趋势指标">
+            <button class="legend-item" type="button" data-series="total" aria-pressed="true"><span class="check on"></span><span>总量</span></button>
+            <button class="legend-item" type="button" data-series="cached" aria-pressed="true"><span class="check on teal"></span><span>缓存</span></button>
+            <button class="legend-item" type="button" data-series="output" aria-pressed="true"><span class="check on sky"></span><span>输出</span></button>
+            <button class="legend-item" type="button" data-series="input" aria-pressed="true"><span class="check on"></span><span>输入</span></button>
+            <button class="legend-item" type="button" data-series="reasoning" aria-pressed="true"><span class="check on violet"></span><span>推理</span></button>
+          </div>
+          <div class="chart-wrap">
+            <svg id="trendChart" viewBox="0 0 1000 214" role="img" aria-label="Token 消耗折线图">
+              <line x1="40" y1="194" x2="985" y2="194" class="axis-line"/>
+              <text x="444" y="112" class="chart-label">等待本地 Codex 数据</text>
+            </svg>
+          </div>
+        </article>
+
+        <article id="quotaPanel" class="panel">
+          <div class="panel-title">
+            <h2>额度与风险</h2>
+            <span id="quotaSource" class="badge">来源：额度状态</span>
+          </div>
+          <div class="quota">
+            <div class="ringbox" aria-label="额度环形图">
+              <svg viewBox="0 0 210 210" aria-hidden="true">
+                <circle class="ring-bg" cx="105" cy="105" r="76"/>
+                <circle class="ring-bg" cx="105" cy="105" r="58"/>
+                <circle class="ring-bg" cx="105" cy="105" r="40"/>
+                <circle class="ring-main" cx="105" cy="105" r="76"/>
+                <circle class="ring-teal" cx="105" cy="105" r="58"/>
+                <circle class="ring-sky" cx="105" cy="105" r="40"/>
+              </svg>
+              <div class="shield">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 3.2 19 6.5v5.2c0 4.4-2.8 7.3-7 9.1-4.2-1.8-7-4.7-7-9.1V6.5l7-3.3Z" fill="#e9fff3" stroke="#1db954" stroke-width="1.8"/>
+                  <path d="m8.7 12.1 2.2 2.2 4.5-5" stroke="#1db954" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span id="shieldState">等待数据</span>
+              </div>
+            </div>
+            <div class="quota-risk">
+              <div id="riskList" class="risk-list quota-risk-list">
+                <div class="list-empty">等待 rate_limits 与调用数据</div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <section class="metrics">
+          <article class="metric metric-primary">
+            <h3>Token 总量</h3>
+            <div id="tokenTotal" class="metric-value">--</div>
+            <div class="splitbar" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+            <div class="split-legend">
+              <span><i class="dot"></i>输入<b id="inputTokens">--</b></span>
+              <span><i class="dot teal"></i>缓存<b id="cachedTokens">--</b></span>
+              <span><i class="dot sky"></i>输出<b id="outputTokens">--</b></span>
+              <span><i class="dot violet"></i>推理<b id="reasoningTokens">--</b></span>
+            </div>
+          </article>
+          <article class="metric">
+            <h3>调用量</h3>
+            <div id="requestCount" class="metric-value">--</div>
+            <svg class="spark" viewBox="0 0 126 42" aria-hidden="true">
+              <path id="requestSpark" fill="none" stroke="#2f80ff" stroke-width="2.2" stroke-linecap="round"/>
+            </svg>
+            <div class="metric-footer">
+              <span>成功率 <strong id="successRate">--</strong></span>
+              <span>失败 <strong id="failureCount" class="fail">--</strong></span>
+            </div>
+          </article>
+          <article class="metric">
+            <h3>峰值速率</h3>
+            <div><span id="peakRate" class="metric-value">--</span><span class="metric-unit">TPM</span></div>
+            <svg class="spark" viewBox="0 0 126 42" aria-hidden="true">
+              <path id="peakSpark" fill="none" stroke="#2f80ff" stroke-width="2.2" stroke-linecap="round"/>
+            </svg>
+            <div class="metric-footer">
+              <span>当前筛选区间峰值</span>
+            </div>
+          </article>
+          <article class="metric">
+            <h3>缓存命中率</h3>
+            <div id="cacheHit" class="metric-value">--</div>
+            <div class="delta">缓存<span>输入 token</span></div>
+            <svg class="spark small" viewBox="0 0 126 36" aria-hidden="true">
+              <path id="cacheSpark" fill="none" stroke="#2f80ff" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </article>
+        </section>
+
+        <section id="distributionPanel" class="coverage distribution-panel" aria-label="调用和 Token 分布">
+          <div class="panel-title distribution-title">
+            <div class="dist-heading">
+              <h3>时间分布</h3>
+              <div id="rangeSummary" class="forecast">今天</div>
+            </div>
+            <div class="dist-toolbar">
+              <div class="dist-toggle" role="group" aria-label="分布指标">
+                <button class="dist-mode active" type="button" data-dist-mode="calls">调用</button>
+                <button class="dist-mode" type="button" data-dist-mode="tokens">Token</button>
+              </div>
+            </div>
+          </div>
+          <div id="distributionChart" class="distribution-chart"></div>
+        </section>
+
+        <section class="lower">
+          <article id="sessionPanel" class="panel">
+            <div class="panel-title session-title">
+              <h3>会话排行</h3>
+              <div class="dist-toggle session-toggle" role="group" aria-label="会话排行指标">
+                <button class="session-mode active" type="button" data-session-mode="tokens">Token</button>
+                <button class="session-mode" type="button" data-session-mode="requests">调用</button>
+              </div>
+            </div>
+            <label class="rank-search"><span class="sr-only">搜索会话</span><input id="sessionSearch" type="search" placeholder="搜索会话或模型" autocomplete="off"></label>
+            <div id="sessionList" class="rank-list">
+              <div class="session-head">
+                <span>会话</span><span>模型</span><span>Token 消耗</span><span>调用数</span><span>状态</span>
+              </div>
+              <div class="list-empty">等待本地 Codex 会话数据</div>
+            </div>
+            <button id="toggleSessions" class="link" type="button" hidden>展开会话 <span>↓</span></button>
+          </article>
+
+          <article id="modelPanel" class="panel">
+            <div class="panel-title"><h3>模型排行</h3></div>
+            <label class="rank-search"><span class="sr-only">搜索模型</span><input id="modelSearch" type="search" placeholder="搜索模型" autocomplete="off"></label>
+            <div id="modelList" class="model-list">
+              <div class="session-head" style="grid-template-columns:120px 1fr 72px 62px">
+                <span>模型</span><span></span><span>Token 总量</span><span>首 Token 延迟</span>
+              </div>
+              <div class="list-empty">等待本地 Codex 模型数据</div>
+            </div>
+            <button id="toggleModels" class="link" type="button" hidden>展开模型 <span>↓</span></button>
+          </article>
+
+          <article id="costPanel" class="panel cost-panel">
+            <div class="panel-title cost-title">
+              <h3>费用统计</h3>
+              <div class="cost-actions">
+                <span class="cost-source">官方美元价
+                  <span class="cost-help-wrap">
+                    <button id="costHelp" class="cost-help" type="button" aria-label="费用估算说明" aria-expanded="false" aria-describedby="costHelpTip">i</button>
+                    <span id="costHelpTip" class="cost-popover" role="tooltip">
+                      <b>官方价格表 · USD / 1M tokens</b>
+                      <table class="price-table" aria-label="官方美元价格表">
+                        <thead>
+                          <tr><th>模型</th><th>输入</th><th>缓存</th><th>输出</th></tr>
+                        </thead>
+                        <tbody id="priceTableBody">
+                          <tr><td colspan="4">等待价格表</td></tr>
+                        </tbody>
+                      </table>
+                      <span class="price-note">推理 token 按输出价估算；这里只读本地日志，实际账单和套餐额度以官方为准。</span>
+                      <a href="https://openai.com/api/pricing/" target="_blank" rel="noreferrer">打开 OpenAI 价格页</a>
+                    </span>
+                  </span>
+                </span>
+                <div class="currency-toggle" role="group" aria-label="费用币种">
+                  <button class="currency-mode active" type="button" data-currency="USD">USD</button>
+                  <button class="currency-mode" type="button" data-currency="CNY">CNY</button>
+                </div>
+              </div>
+            </div>
+            <div id="costContent" class="cost-content">
+              <div class="list-empty">等待本地 token 用量</div>
+            </div>
+          </article>
+        </section>
+      </section>
+    </main>
+  </div>
+  <script src="./data.sample.js"></script>
+  <script src="./data.js"></script>
+  <script src="./app.js"></script>
+  <script src="./live.js"></script>
+</body>
+</html>
