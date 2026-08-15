@@ -1,179 +1,198 @@
-# CodexScope
+# CodexScope Live
 
 English | [简体中文](README.zh-CN.md)
 
 [![LINUX DO](https://img.shields.io/badge/LINUX-DO-FFB003?style=flat-square)](https://linux.do)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-CodexScope is a local-first dashboard for inspecting Codex usage from local session logs. It turns local Codex metadata into a clean desktop dashboard with token trends, quota and risk status, session rankings, model rankings, request distribution, cache hit rate, and estimated cost.
+CodexScope Live is a local-first dashboard for understanding Codex usage from local session logs. It turns token usage, quota status, model mix, session activity, request distribution, cache hits, and estimated cost into a desktop-friendly view.
 
-![CodexScope dashboard](assets/codexscope-dashboard-24h.png)
+![CodexScope Live dashboard](assets/codexscope-dashboard-24h.png)
 
 ## Attribution
 
-This is a local derivative and planned personal adaptation of the open-source **CodexScope** project. The original project was created and published by **JUk1-GH**:
+This repository is a local derivative and personal adaptation of the open-source **CodexScope** project. The original project was created and published by **[JUk1-GH](https://github.com/JUk1-GH)**.
 
 - Original repository: [JUk1-GH/CodexScope](https://github.com/JUk1-GH/CodexScope)
-- Original author/maintainer: [JUk1-GH](https://github.com/JUk1-GH)
-- License: MIT; see [LICENSE](LICENSE)
+- Original license: [MIT](LICENSE)
 
-This version keeps the original attribution and license while adding local changes. It is not the upstream repository.
+The original attribution and license are retained. This repository is an independent personal version and is not the upstream project.
 
-The dashboard is a static HTML app: no backend, no account connection, and no hosted telemetry. Your real usage export stays local in `data.js` and `data.raw.js`, which are intentionally ignored by git. Recent exports keep precomputed dashboard views in `data.js`; compact catalogs and raw rows are loaded from `data.raw.js` only for custom date ranges.
+## What it does
 
-## Why
+CodexScope Live reads the usage metadata already present in local Codex JSONL session logs. It does not connect to a Codex account, upload prompts, or run a hosted backend.
 
-Codex usage is easiest to understand when quota, token volume, model mix, and session-level hotspots are visible in one place. CodexScope is built for that narrow job: open a local page, generate a local export, and see where usage went without shipping prompts or project data to another service.
+The project has two modes:
+
+| Mode | Best for | How it works |
+| --- | --- | --- |
+| Static preview | Quickly viewing the interface | Open `index.html`; bundled sample data is used when no local export exists. |
+| Local live dashboard | Watching local usage while Codex is running | A small Rust server serves the page, watches the session directory, regenerates local exports, and sends refresh events through Server-Sent Events (SSE). |
 
 ## Features
 
-- Cumulative token trend with absolute and logarithmic views
-- Date filters for last 24 hours, today, last 7 days, last 30 days, all history, and custom ranges
-- Request and token distribution charts for spotting usage peaks
-- Codex quota and risk status from local `rate_limits` events when available
-- Session and model rankings with token totals and request counts
-- Estimated cost by model and token type, shown in USD by default with optional CNY conversion
+- Cumulative input, cached, output, and reasoning token trends
+- Absolute and logarithmic chart views
+- Presets for the last 24 hours, today, 7 days, 30 days, and all history
+- Custom date ranges backed by the raw local event catalog
+- Request and token distribution charts
+- Quota and risk status from local `rate_limits` events when available
+- Session and model rankings with local search filters
+- Estimated cost by model and token type, with USD and optional CNY display
+- Live refresh toggle, connection status, manual refresh, and scroll-position recovery
 - Local-only data generation from `~/.codex/sessions`
-- Desktop-focused responsive layout with a lightweight static frontend
+- Responsive desktop-focused interface with no hosted telemetry
 
-## Quick Start
+## Quick start
 
-Download the project and open `index.html` directly in a browser. It will show bundled sample data immediately, so you can preview the dashboard without running anything else.
+### Preview the dashboard
 
-For the local live dashboard on Windows, double-click `windows/open-dashboard.cmd`. The launcher starts the Rust local server at `http://127.0.0.1:4173/`, opens the dashboard, and watches the local Codex session directory. When a session log changes, the server regenerates the local export and the page refreshes if live mode is enabled. The refresh preserves the current scroll position.
+No toolchain is required to preview the bundled sample data:
 
-The live server can also be checked or run manually:
+1. Download or clone this repository.
+2. Open `index.html` in a browser.
 
-```powershell
-cargo check --manifest-path .\live-server\Cargo.toml --all-targets
-cargo run --manifest-path .\live-server\Cargo.toml -- --root . --port 4173
-```
+When opened with `file://`, the page works as a static preview. Live refresh is unavailable in this mode.
 
-The Rust server uses the existing Go generator when a prebuilt generator is present or Go is installed. Without either one, the dashboard still serves bundled sample data, but it cannot generate fresh local usage exports.
+### Run the live dashboard on Windows
 
-To view your real local Codex usage, normal users should download the platform package from GitHub Releases:
+The Windows launcher starts the local Rust server at `http://127.0.0.1:4173/`:
 
-- **macOS**: download `CodexScope-mac.zip`, unzip it, then double-click `Open CodexScope.command` in the extracted folder
-- **Windows**: download `CodexScope-windows.zip`, unzip it, then double-click `Open CodexScope.cmd` in the extracted folder
+~~~text
+windows/open-dashboard.cmd
+~~~
 
-Release zips include a prebuilt generator, so normal users do not need to install Go. The launcher generates `data.js` and `data.raw.js` from your local Codex logs and then opens `index.html`. Source checkouts can still fall back to `go build` when the prebuilt generator is absent.
-Subsequent runs reuse a local `.codexscope-cache.json` file and only rescan changed session logs. If nothing changed, the generator can skip rewriting the export files; if a log grew, it appends from the previous cached offset.
+Double-click the script, or run it from a terminal. The launcher uses a local `codexscope-live.exe` when one is available. Otherwise, it falls back to `cargo run`.
 
-Note: GitHub's automatic **Source code (zip)** asset is for developers, not the recommended user download. It may require Go or local compilation. Prefer `CodexScope-mac.zip` / `CodexScope-windows.zip`.
+For a source checkout, install:
 
-If macOS says it cannot verify `open-dashboard.command`, open **System Settings → Privacy & Security**, find the blocked `open-dashboard.command` message, and click **Open Anyway**. You can also right-click the file and choose **Open**.
+- Rust and Cargo, for the local live server
+- Go, unless a prebuilt Go data generator is available
 
-If macOS still refuses to open it, run this once in Terminal from the project folder:
-
-```bash
-xattr -dr com.apple.quarantine .
-chmod +x macos/open-dashboard.command
-```
-
-You can also run the same steps manually on macOS or Linux:
-
-```bash
-go run generate_codex_data.go
-open index.html
-```
-
-On Windows PowerShell:
-
-```powershell
-go run .\generate_codex_data.go
-start .\index.html
-```
-
-By default, the generator reads Codex logs from:
+The Rust server polls the local Codex session directory, whose default location is:
 
 - macOS/Linux: `~/.codex/sessions`
-- Windows: `%USERPROFILE%\.codex\sessions`
+- Windows: `%USERPROFILE%/.codex/sessions`
 
-If your Codex sessions are stored elsewhere, pass the path explicitly:
+When a JSONL session changes, the server invokes the existing Go generator and sends an SSE event to connected browsers. Enable live mode in the dashboard to reload the data automatically.
 
-```powershell
-go run .\generate_codex_data.go --root "$env:USERPROFILE\.codex\sessions"
-```
+### Run the live server manually
 
-The generator writes `data.js` and `data.raw.js` next to `index.html`. Once those files exist, the dashboard automatically uses your real local data instead of the bundled demo. `data.js`, `data.raw.js`, and `.codexscope-cache.json` may contain private project names, session ids, timestamps, usage patterns, and quota status, so they are excluded by `.gitignore`.
+From the repository root:
 
-## Project Structure
+~~~powershell
+cargo run --manifest-path ./live-server/Cargo.toml -- --root . --port 4173
+~~~
 
-- `index.html`: the static dashboard shell.
-- `styles.css`: dashboard layout and visual styling.
-- `app.ts`: TypeScript source for charts, filters, rankings, quota display, and cost estimation.
-- `app.js`: compiled browser script loaded by `index.html`.
-- `live.js`: browser-side SSE client, live refresh toggle, connection state, and manual refresh.
-- `live-server/`: Rust local server for static files, log change monitoring, and SSE updates.
-- `generate_codex_data.go`: the local data generator. It scans Codex JSONL session logs, extracts usage metadata, and writes `data.js` plus `data.raw.js`.
-- `data.sample.js`: bundled demo data used when no local `data.js` exists.
-- `CHANGELOG.md`: release notes for each published version.
-- `macos/open-dashboard.command`: macOS launcher that runs the generator and opens the dashboard.
-- `windows/open-dashboard.cmd`: Windows launcher that runs the generator and opens the dashboard.
-- `verify_responsive.js`: Playwright-based layout and interaction audit.
-- `scripts/build-release.sh`: builds platform-specific release folders and zip packages.
-- `assets/`: screenshots and static project assets.
+Useful options:
 
-## Data Flow
+~~~text
+--root <path>          Dashboard root directory; defaults to the current directory
+--sessions <path>      Codex session directory; defaults to the platform home directory
+--generator <path>     Explicit path to a prebuilt data generator
+--port <number>        Local HTTP port; defaults to 4173
+--interval-ms <number> Polling interval; defaults to 1000 ms
+~~~
 
-1. Codex writes local JSONL session logs under `~/.codex/sessions`.
-2. `generate_codex_data.go` scans local `.jsonl` files and extracts only usage metadata: token counts, model names, session ids, timing, failures, and rate-limit metadata.
-3. The generator writes precomputed range views to `data.js` as `window.CODEXSCOPE_DATA`, and compact catalogs plus raw event rows to `data.raw.js` as `window.CODEXSCOPE_RAW_DATA`.
-4. `index.html` loads `data.sample.js` first and then `data.js`. If real local data exists, it overrides the sample data; `data.raw.js` is loaded only when custom date ranges need raw rows.
-5. Date filters, charts, rankings, quota status, and cost estimates are computed in the browser from that local record set.
+If neither a prebuilt generator nor Go is available, the server can still serve the dashboard, but it cannot create fresh local exports.
 
-## What Gets Displayed
+## Generate local data manually
 
-- **Token trend**: cumulative input, cached, output, and reasoning token usage over the selected range.
-- **Quota and risk**: remaining short-window and weekly quota when Codex local logs include rate-limit metadata.
-- **Distribution**: request count or token volume grouped by time bucket.
-- **Rankings**: busiest sessions and models for the selected period.
-- **Cost estimate**: a local estimate using token counts and model pricing rules exported by the generator.
+The Go generator reads local session logs and writes the browser data files next to `index.html`:
 
-## Cost Estimates
+~~~powershell
+go run ./generate_codex_data.go --root "$env:USERPROFILE/.codex/sessions"
+~~~
 
-The cost card is an estimate, not an official bill. It uses local token counts and generator-exported rules based on OpenAI's published USD model prices. Actual ChatGPT/Codex billing, credits, and subscription quota status should always be checked with the official account or billing page.
+On macOS or Linux:
 
-USD is the source currency. The CNY view is only a display conversion. When available, CodexScope fetches the USD/CNY rate from the Frankfurter API with the ECB provider selected. If that request fails, it falls back to the last bundled reference rate and marks the conversion as offline fallback in the UI.
+~~~bash
+go run ./generate_codex_data.go --root "$HOME/.codex/sessions"
+~~~
 
-## Verify Layout
+The generated files are:
 
-The responsive visual audit uses Playwright:
+- `data.js`: precomputed dashboard views for common date ranges
+- `data.raw.js`: compact catalogs and raw event rows used for custom ranges
+- `.codexscope-cache.json`: incremental parsing cache
 
-```bash
+These files can contain private project names, session IDs, timestamps, usage patterns, and quota metadata. They are ignored by `.gitignore`; review them before sharing any export or screenshot.
+
+## Development
+
+### Requirements
+
+- Node.js and npm, for the frontend build and visual verification
+- Rust and Cargo, for the live server
+- Go, for local data generation and release generator builds
+- Playwright, installed by `npm install`, for responsive verification
+
+### Install and verify
+
+~~~bash
 npm install
+npm run build:frontend
+npm run check:live
 npm run verify
-```
+~~~
 
-## Build Release Packages
+Build the Rust live server binary with:
 
-Release packages include prebuilt generators, so end users do not need Go:
+~~~bash
+npm run build:live
+~~~
 
-```bash
-npm install
+The release binary is written to `live-server/target/release/`. On Windows, the launcher also looks for `codexscope-live.exe` in the repository root or in that release directory.
+
+The existing release script builds the platform packages and precompiled Go generator:
+
+~~~bash
 npm run release:local
-```
+~~~
 
-This writes:
+The current release script does not bundle the Rust live server. Use the source-checkout instructions above for the live dashboard, or extend the release packaging step before distributing a live-enabled package.
 
-- `dist/CodexScope-mac.zip` with a root-level launcher and instructions, with the rest tucked under `CodexScope Files/`
-- `dist/CodexScope-windows.zip` with a root-level launcher and instructions, with the rest tucked under `CodexScope Files/`
+## Data flow
 
-The GitHub Actions release workflow builds the same zip files for tags named `v*`.
+1. Codex writes local JSONL session logs under the platform-specific session directory.
+2. `generate_codex_data.go` extracts usage metadata such as token counts, model names, session IDs, timing, failures, and rate-limit metadata.
+3. The generator writes precomputed views to `data.js` and compact raw data to `data.raw.js`.
+4. The browser loads sample data first, then overrides it with local exports when those files exist.
+5. In live mode, the Rust server detects changed JSONL files, regenerates the export, and notifies the browser through SSE.
+6. Charts, filters, rankings, quota status, and cost estimates are calculated in the browser.
 
-## Privacy
+The generator does not export prompt text, assistant messages, tool output, or file contents.
 
-CodexScope does not send data to a server. `generate_codex_data.go` reads local Codex session logs and exports only usage metadata:
+## Cost estimates
 
-- session id and working-directory basename
-- model name
-- token counts
-- rate limit metadata
-- task duration, first-token latency, failures
+The cost card is an estimate, not an official bill. It uses local token counts and model-pricing rules exported by the generator. USD is the source currency; CNY is a display conversion only.
 
-It does not export prompt text, assistant messages, tool output, or file contents.
+When available, the dashboard retrieves the USD/CNY rate from the Frankfurter API using the ECB provider. If the request fails, it uses a bundled reference rate and marks the conversion as an offline fallback. Actual ChatGPT or Codex billing, credits, and quota status should be checked through the official account or billing page.
 
-Review `data.js` and `data.raw.js` before sharing screenshots or artifacts generated from your own usage.
+## Project structure
+
+- `index.html`: dashboard shell and controls
+- `styles.css`: layout and visual styling
+- `app.ts`: TypeScript source for charts, filters, rankings, quota display, and cost estimates
+- `app.js`: compiled browser script
+- `live.js`: browser-side SSE client and live-refresh controls
+- `live-server/`: Rust local server for static files, session monitoring, and SSE notifications
+- `generate_codex_data.go`: local usage-data generator
+- `data.sample.js`: bundled sample data
+- `macos/open-dashboard.command`: macOS data-generation launcher
+- `windows/open-dashboard.cmd`: Windows live-server launcher
+- `scripts/build-release.sh`: platform release-package builder
+- `verify_responsive.js`: Playwright layout and interaction audit
+- `assets/`: screenshots and static assets
+
+## Limitations
+
+- Live monitoring is local polling, not a Codex API stream; the default interval is 1 second.
+- Live mode requires the Rust server and a usable Go generator or prebuilt generator.
+- Quota and risk information is only available when the local session logs contain the relevant `rate_limits` metadata.
+- Cost values are estimates and should not be treated as billing records.
+- The server binds to loopback (`127.0.0.1`) and is intended for local use only.
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).
