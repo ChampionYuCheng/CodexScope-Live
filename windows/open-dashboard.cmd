@@ -3,7 +3,7 @@ setlocal
 
 cd /d "%~dp0.."
 set "ROOT=%cd%"
-set "PORT=4173"
+set "PORT=48173"
 set "LIVE_EXE=%ROOT%\codexscope-live.exe"
 if not exist "%LIVE_EXE%" set "LIVE_EXE=%ROOT%\live-server\target\release\codexscope-live.exe"
 

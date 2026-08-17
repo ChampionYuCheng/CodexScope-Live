@@ -56,7 +56,7 @@ CodexScope Live 读取本机 Codex JSONL 会话日志中已经存在的用量元
 
 ### 在 Windows 上运行实时面板
 
-Windows 启动脚本会在 `http://127.0.0.1:4173/` 启动本地 Rust 服务：
+Windows 启动脚本会在 `http://127.0.0.1:48173/` 启动本地 Rust 服务：
 
 ~~~text
 windows/open-dashboard.cmd
@@ -81,7 +81,7 @@ Rust 服务默认监控以下 Codex 会话目录：
 在仓库根目录执行：
 
 ~~~powershell
-cargo run --manifest-path ./live-server/Cargo.toml -- --root . --port 4173
+cargo run --manifest-path ./live-server/Cargo.toml -- --root . --port 48173
 ~~~
 
 常用参数：
@@ -90,7 +90,7 @@ cargo run --manifest-path ./live-server/Cargo.toml -- --root . --port 4173
 --root <path>          面板根目录，默认是当前目录
 --sessions <path>      Codex 会话目录，默认使用当前平台的用户目录
 --generator <path>     指定预编译数据生成器路径
---port <number>        本地 HTTP 端口，默认是 4173
+--port <number>        本地 HTTP 端口，默认是 48173
 --interval-ms <number> 轮询间隔，默认是 1000 ms
 ~~~
 

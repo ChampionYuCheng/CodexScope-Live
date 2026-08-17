@@ -56,7 +56,7 @@ When opened with `file://`, the page works as a static preview. Live refresh is 
 
 ### Run the live dashboard on Windows
 
-The Windows launcher starts the local Rust server at `http://127.0.0.1:4173/`:
+The Windows launcher starts the local Rust server at `http://127.0.0.1:48173/`:
 
 ~~~text
 windows/open-dashboard.cmd
@@ -81,7 +81,7 @@ When a JSONL session changes, the server invokes the existing Go generator and s
 From the repository root:
 
 ~~~powershell
-cargo run --manifest-path ./live-server/Cargo.toml -- --root . --port 4173
+cargo run --manifest-path ./live-server/Cargo.toml -- --root . --port 48173
 ~~~
 
 Useful options:
@@ -90,7 +90,7 @@ Useful options:
 --root <path>          Dashboard root directory; defaults to the current directory
 --sessions <path>      Codex session directory; defaults to the platform home directory
 --generator <path>     Explicit path to a prebuilt data generator
---port <number>        Local HTTP port; defaults to 4173
+--port <number>        Local HTTP port; defaults to 48173
 --interval-ms <number> Polling interval; defaults to 1000 ms
 ~~~
 

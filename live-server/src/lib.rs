@@ -22,7 +22,7 @@ impl ServerConfig {
         let mut root = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let mut sessions = default_sessions_path();
         let mut generator = None;
-        let mut port = 4173;
+        let mut port = 48173;
         let mut interval_ms = 1000;
         let mut iter = args.into_iter().skip(1).map(|arg| arg.as_ref().to_owned());
 
