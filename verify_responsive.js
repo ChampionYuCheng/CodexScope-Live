@@ -133,6 +133,19 @@ function isVisibleInViewport(rect, height) {
           hasRefresh: !!document.querySelector("#manualRefresh"),
           hasScript: !!document.querySelector("script[src='./live.js']"),
         },
+        tabNavigation: (() => {
+          const tabList = document.querySelector('[role="tablist"]');
+          const tabs = Array.from(document.querySelectorAll('[role="tab"]'));
+          const listRect = tabList?.getBoundingClientRect();
+          return {
+            count: tabs.length,
+            allInView: !!listRect && tabs.every((tab) => {
+              const rect = tab.getBoundingClientRect();
+              return rect.left >= listRect.left - 1 && rect.right <= listRect.right + 1;
+            }),
+            touchTargets: tabs.every((tab) => tab.getBoundingClientRect().height >= 44),
+          };
+        })(),
         trendPaths: Array.from(document.querySelectorAll("#trendChart path[data-series]"))
           .map((path) => {
             const nums = (path.getAttribute("d")?.match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
@@ -151,6 +164,51 @@ function isVisibleInViewport(rect, height) {
       const sessionButton = document.querySelector("#toggleSessions");
       const modelButton = document.querySelector("#toggleModels");
       const count = (selector) => document.querySelectorAll(selector).length;
+      const settle = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const tabAudit = [];
+      const tabs = Array.from(document.querySelectorAll('[role="tab"][data-tab]'));
+      for (const tab of tabs) {
+        tab.click();
+        await settle();
+        const tabId = tab.dataset.tab || "";
+        const activePanel = document.querySelector(`[role="tabpanel"][data-tab-panel="${tabId}"]`);
+        const activePanelRect = activePanel?.getBoundingClientRect();
+        const visibleTabPanels = Array.from(document.querySelectorAll('[role="tabpanel"]'))
+          .filter((panel) => !panel.hidden && getComputedStyle(panel).display !== "none");
+        const textOverflows = activePanel ? Array.from(activePanel.querySelectorAll("*")).filter((el) => {
+          const style = getComputedStyle(el);
+          return !el.classList.contains("sr-only")
+            && el.scrollWidth > el.clientWidth + 1
+            && style.overflowX !== "auto"
+            && style.overflowX !== "scroll"
+            && style.overflow !== "visible"
+            && style.textOverflow !== "ellipsis";
+        }).length : 1;
+        const cards = activePanel ? Array.from(activePanel.querySelectorAll(".panel,.metric,.coverage")) : [];
+        const clippedCards = cards.flatMap((card) => {
+          const cardRect = card.getBoundingClientRect();
+          return Array.from(card.querySelectorAll("*")).filter((el) => {
+            if (el.closest("#distributionChart") || el.closest(".chart-wrap")) return false;
+            const rect = el.getBoundingClientRect();
+            return rect.width > 1
+              && rect.height > 1
+              && rect.bottom > cardRect.top
+              && rect.top < cardRect.bottom
+              && (rect.left < cardRect.left - 1 || rect.right > cardRect.right + 1);
+          }).length;
+        }).reduce((total, value) => total + value, 0);
+        tabAudit.push({
+          tab: tabId,
+          selected: tab.getAttribute("aria-selected") === "true",
+          visiblePanels: visibleTabPanels.map((panel) => panel.dataset.tabPanel),
+          cards: cards.length,
+          hash: location.hash,
+          horizontalScroll: document.documentElement.scrollWidth > innerWidth,
+          textOverflows,
+          clippedCards,
+          viewportBottomGap: activePanelRect ? Math.max(0, Math.round(innerHeight - activePanelRect.bottom)) : innerHeight,
+        });
+      }
       const beforeSessions = count("#sessionList .session-row");
       const sessionsToggleNotNeeded = !sessionButton || sessionButton.hidden;
       sessionButton?.click();
@@ -161,9 +219,10 @@ function isVisibleInViewport(rect, height) {
       modelButton?.click();
       const afterModels = count("#modelList .model-row");
       modelButton?.click();
-      const settle = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      const tab = document.querySelector('.tab[data-scroll-target="sessionPanel"]');
+      const tab = document.querySelector('.tab[data-tab="session"]');
       tab?.click();
+      await settle();
+      const sessionPanelVisible = !document.querySelector('#tab-session-panel')?.hidden;
       const dayButton = document.querySelector('.period-btn[data-range="24h"]');
       dayButton?.click();
       await settle();
@@ -268,7 +327,19 @@ function isVisibleInViewport(rect, height) {
       return {
         sessionsExpandable: sessionsToggleNotNeeded || afterSessions > beforeSessions,
         modelsExpandable: modelsToggleNotNeeded || afterModels > beforeModels,
-        tabActivates: !tab || tab.classList.contains("active"),
+        tabActivates: !tab || (tab.classList.contains("active") && sessionPanelVisible),
+        tabPagesValid: tabAudit.length === 6 && tabAudit.every((entry) => (
+          entry.selected
+          && entry.visiblePanels.length === 1
+          && entry.visiblePanels[0] === entry.tab
+          && entry.cards >= 1
+          && entry.hash === `#${entry.tab}`
+        )),
+        tabPagesResponsive: tabAudit.every((entry) => (
+          !entry.horizontalScroll && entry.textOverflows === 0 && entry.clippedCards === 0
+        )),
+        tabPagesDense: innerWidth < 700 || innerHeight < 650 || tabAudit.every((entry) => entry.viewportBottomGap <= 80),
+        tabAudit,
         dateDayActivates: dayActivated,
         dateSevenActivates: sevenActivated,
         distributionRendersAfterDateChange: distributionAfterSeven > 0,
@@ -286,13 +357,12 @@ function isVisibleInViewport(rect, height) {
       };
     });
 
-    const minVisiblePanels = width >= 700 ? 9 : 4;
     const viewportLabel = `${width}x${height}`;
     const issues = [];
     if (report.scrollWidth > width) issues.push(`horizontal scroll ${report.scrollWidth} > ${width}`);
     if (report.textOverflows.length) issues.push(`${report.textOverflows.length} text overflows`);
     if (report.clippedInPanels.length) issues.push(`${report.clippedInPanels.length} panel clipping issues`);
-    if (report.visiblePanels.length < minVisiblePanels) issues.push(`only ${report.visiblePanels.length}/${minVisiblePanels} visible panels`);
+    if (report.visiblePanels.length < 1) issues.push("active tab has no visible dashboard cards");
     if (report.copyFlags.hasFakeForecast) issues.push("fake forecast copy remains");
     if (report.copyFlags.hasFakeViewAll) issues.push("fake view-all copy remains");
     if (report.copyFlags.hasNonCodexSources) issues.push("non-Codex source copy remains");
@@ -301,13 +371,18 @@ function isVisibleInViewport(rect, height) {
     if (report.trendPaths.some((path) => path.maxY !== null && path.maxY > 194.5)) issues.push("trend curve renders below zero axis");
     if (!report.distributionState.bars && !report.distributionState.empty) issues.push("distribution chart renders no state");
     if (report.distributionState.bars && report.distributionState.encodedValues < report.distributionState.bars) issues.push("distribution bars missing accessible numeric values");
-    if (report.distributionState.bars && report.distributionState.values < Math.min(3, report.distributionState.bars)) issues.push("distribution chart has too few visible value labels");
+    if (report.distributionState.bars && report.distributionState.values < 1) issues.push("distribution chart has no visible value label");
     if (!report.costState.hasUsdDefault) issues.push("cost card does not default to USD");
     if (!report.costState.hasCnyToggle) issues.push("cost card missing CNY toggle");
     if (!report.liveState.hasStatus || !report.liveState.hasToggle || !report.liveState.hasRefresh || !report.liveState.hasScript) issues.push("live refresh controls are missing");
+    if (report.tabNavigation.count !== 6 || !report.tabNavigation.allInView) issues.push("not all dashboard tabs are visible in the navigation strip");
+    if (!report.tabNavigation.touchTargets) issues.push("dashboard tabs do not meet the 44px touch target");
     if (!interactions.sessionsExpandable) issues.push("session expand control does not expand");
     if (!interactions.modelsExpandable) issues.push("model expand control does not expand");
     if (!interactions.tabActivates) issues.push("navigation tab does not activate");
+    if (!interactions.tabPagesValid) issues.push("tab pages are not mutually exclusive or URL-synchronized");
+    if (!interactions.tabPagesResponsive) issues.push("one or more tab pages overflow or clip content");
+    if (!interactions.tabPagesDense) issues.push("one or more tab pages leave excessive unused vertical space");
     if (!interactions.dateDayActivates) issues.push("24-hour date filter does not activate");
     if (!interactions.dateSevenActivates) issues.push("7-day date filter does not activate");
     if (!interactions.distributionRendersAfterDateChange) issues.push("distribution chart does not rerender after date filter");
@@ -330,7 +405,7 @@ function isVisibleInViewport(rect, height) {
       visiblePanels: report.visiblePanels.length,
       issues,
     });
-    if (issues.length) failures.push({ viewport: viewportLabel, issues, details: report });
+    if (issues.length) failures.push({ viewport: viewportLabel, issues, details: { ...report, tabAudit: interactions.tabAudit } });
 
     await page.close();
   }

@@ -40,6 +40,12 @@ CodexScope Live 读取本机 Codex JSONL 会话日志中已经存在的用量元
 - 会话排行和模型排行，支持本地搜索过滤
 - 按模型和 Token 类型估算费用，支持 USD 和 CNY 展示
 - 实时刷新开关、连接状态、手动刷新和滚动位置恢复
+- 启动阶段自动等待真实 `data.js` 就绪，避免 Go 生成尚未完成时长期停留在示例数据
+- 总览、额度、Token、会话、模型与费用、速率分布 6 个真正的 Tab 页面
+- Tab 内容自适应填满首屏：总览使用 2×2 指标卡，图表和排行按可用高度扩展，减少大面积无效留白
+- 全新的 CodexScope-Live 脉冲 Logo，以及相互独立的浅色/深色模式、四套调色板和亚克力、液态玻璃、哑光、半透明四种材质风格
+- 支持仅保存在浏览器本地的自定义背景图，可调整遮罩强度和模糊程度；图片不会写入仓库或上传网络
+- 使用 URL 哈希保存当前页面，支持刷新恢复、浏览器前进后退和方向键/Home/End 导航
 - 从 `~/.codex/sessions` 本地生成数据
 - 桌面端优先的响应式界面，不使用托管遥测
 
@@ -75,6 +81,8 @@ Rust 服务默认监控以下 Codex 会话目录：
 - Windows：`%USERPROFILE%/.codex/sessions`
 
 当 JSONL 会话文件发生变化时，服务会调用现有的 Go 生成器，并通过 SSE 向已连接的浏览器发送更新事件。在面板中启用实时模式后，页面会自动重新加载数据。
+
+首次启动时，如果浏览器打开速度快于 Go 数据生成，页面会短暂使用示例数据并主动探测真实 `data.js`。真实数据就绪后会自动刷新；此恢复过程不受“暂停实时”开关影响。
 
 ### 手动运行实时服务
 
@@ -176,6 +184,7 @@ npm run release:local
 - `app.ts`：图表、筛选、排行、额度显示和费用估算的 TypeScript 源码
 - `app.js`：编译后的浏览器脚本
 - `live.js`：浏览器端 SSE 客户端和实时刷新控制
+- `theme.js`：外观初始化、浅色/深色模式、调色板与材质持久化，以及浏览器本地背景存储
 - `live-server/`：负责静态文件、会话监控和 SSE 通知的 Rust 本地服务
 - `generate_codex_data.go`：本地用量数据生成器
 - `data.sample.js`：内置示例数据
@@ -183,6 +192,9 @@ npm run release:local
 - `windows/open-dashboard.cmd`：Windows 实时服务启动脚本
 - `scripts/build-release.sh`：分平台 Release 包构建脚本
 - `verify_responsive.js`：基于 Playwright 的布局和交互检查
+- `verify_live_data.js`：检查首次生成期间从示例数据自动恢复为真实数据的 Playwright 回归脚本
+- `verify_tabs.js`：检查语义化 Tab、URL 状态、刷新恢复和键盘导航的 Playwright 回归脚本
+- `verify_theme.js`：检查品牌标识、主题持久化、键盘操作和移动端布局的 Playwright 回归脚本
 - `assets/`：截图和静态资源
 
 ## 当前限制

@@ -40,6 +40,12 @@ The project has two modes:
 - Session and model rankings with local search filters
 - Estimated cost by model and token type, with USD and optional CNY display
 - Live refresh toggle, connection status, manual refresh, and scroll-position recovery
+- Startup recovery that waits for the real `data.js` instead of remaining on sample data while the Go generator finishes
+- Six true tab pages for overview, quota, Token analytics, sessions, models and cost, and rate distribution
+- Adaptive first-screen density with a 2-by-2 overview grid and charts and rankings that expand into available vertical space
+- A redesigned CodexScope-Live pulse logo with independent light/dark modes, four palettes, and Acrylic, Liquid Glass, Matte, and Translucent surface styles
+- Local custom backgrounds stored in the browser, with adjustable overlay strength and blur; images are never written into the repository or uploaded
+- URL hash navigation with refresh persistence, browser history support, and keyboard arrow/Home/End controls
 - Local-only data generation from `~/.codex/sessions`
 - Responsive desktop-focused interface with no hosted telemetry
 
@@ -75,6 +81,8 @@ The Rust server polls the local Codex session directory, whose default location 
 - Windows: `%USERPROFILE%/.codex/sessions`
 
 When a JSONL session changes, the server invokes the existing Go generator and sends an SSE event to connected browsers. Enable live mode in the dashboard to reload the data automatically.
+
+On first startup, the browser can briefly fall back to sample data when it opens before the Go generator finishes. The page probes for the real `data.js` and refreshes automatically when it becomes available, even when continuous live refresh is paused.
 
 ### Run the live server manually
 
@@ -176,6 +184,7 @@ When available, the dashboard retrieves the USD/CNY rate from the Frankfurter AP
 - `app.ts`: TypeScript source for charts, filters, rankings, quota display, and cost estimates
 - `app.js`: compiled browser script
 - `live.js`: browser-side SSE client and live-refresh controls
+- `theme.js`: appearance initialization, light/dark mode, palette and material persistence, plus browser-local background storage
 - `live-server/`: Rust local server for static files, session monitoring, and SSE notifications
 - `generate_codex_data.go`: local usage-data generator
 - `data.sample.js`: bundled sample data
@@ -183,6 +192,9 @@ When available, the dashboard retrieves the USD/CNY rate from the Frankfurter AP
 - `windows/open-dashboard.cmd`: Windows live-server launcher
 - `scripts/build-release.sh`: platform release-package builder
 - `verify_responsive.js`: Playwright layout and interaction audit
+- `verify_live_data.js`: Playwright regression check for recovery from startup sample data to the real generated payload
+- `verify_tabs.js`: Playwright regression check for semantic tabs, URL state, refresh, and keyboard navigation
+- `verify_theme.js`: Playwright regression check for branding, theme persistence, keyboard access, and mobile layout
 - `assets/`: screenshots and static assets
 
 ## Limitations

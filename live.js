@@ -6,6 +6,7 @@
   if (!status || !statusText || !toggle || !refresh) return;
 
   const isServerMode = location.protocol === "http:" || location.protocol === "https:";
+  const initialGeneratedAt = window.CODEXSCOPE_DATA?.generatedAt || null;
   let enabled = localStorage.getItem("codexscope-live-enabled") !== "false";
   let reloading = false;
 
@@ -46,6 +47,35 @@
     setStatus("static", "静态预览");
     return;
   }
+
+  const payloadGeneratedAt = (source) => {
+    const match = source.match(/(?:"generatedAt"|generatedAt)\s*:\s*"([^"]+)"/);
+    return match?.[1] || null;
+  };
+  const startupProbeStartedAt = Date.now();
+  const probeForGeneratedData = async () => {
+    if (reloading) return;
+    try {
+      const response = await fetch(`/data.js?codexscope-ready=${Date.now()}`, { cache: "no-store" });
+      if (!response.ok) return;
+      const source = await response.text();
+      if (!source.includes("window.CODEXSCOPE_DATA")) return;
+      const generatedAt = payloadGeneratedAt(source);
+      if (!window.CODEXSCOPE_DATA || (generatedAt && generatedAt !== initialGeneratedAt)) {
+        reloadPage();
+      }
+    } catch {
+      // The live server may still be starting; the next probe will retry.
+    }
+  };
+  const startupProbe = window.setInterval(() => {
+    const hasRealData = Boolean(window.CODEXSCOPE_DATA);
+    if (hasRealData && Date.now() - startupProbeStartedAt > 30_000) {
+      window.clearInterval(startupProbe);
+      return;
+    }
+    void probeForGeneratedData();
+  }, 750);
 
   setStatus("connecting", "连接实时服务…");
   const events = new EventSource("/events");

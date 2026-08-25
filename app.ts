@@ -5,10 +5,13 @@ interface Window {
   CODEXSCOPE_SAMPLE_DATA?: any;
 }
 
+type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "rate";
+
 (() => {
   const data = window.CODEXSCOPE_DATA || window.QUOTASCOPE_DATA || window.CODEXSCOPE_SAMPLE_DATA;
   if (!data) return;
   const uiState = {
+    activeTab: "overview" as DashboardTabId,
     sessionsExpanded: false,
     modelsExpanded: false,
     sessionMode: "tokens",
@@ -26,6 +29,8 @@ interface Window {
       reasoning: true,
     },
   };
+  const collapsedSessionLimit = 8;
+  const collapsedModelLimit = 6;
 
   const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T | null;
   const clampPercent = (value) => Math.max(0, Math.min(100, Number(value) || 0));
@@ -818,11 +823,11 @@ interface Window {
   };
 
   const seriesConfig = {
-    total: { label: "总量", color: "#1668f2", width: 3, area: "areaBlue" },
-    cached: { label: "缓存", color: "#13aaa0", width: 2.6, area: "areaTeal" },
-    output: { label: "输出", color: "#6fb1ff", width: 2.2 },
-    input: { label: "输入", color: "#2f80ff", width: 2.2 },
-    reasoning: { label: "推理", color: "#8b5cf6", width: 2.2 },
+    total: { label: "总量", color: "var(--blue)", width: 3, area: "areaBlue" },
+    cached: { label: "缓存", color: "var(--teal)", width: 2.6, area: "areaTeal" },
+    output: { label: "输出", color: "var(--sky)", width: 2.2 },
+    input: { label: "输入", color: "var(--blue-2)", width: 2.2 },
+    reasoning: { label: "推理", color: "var(--violet)", width: 2.2 },
   };
   const trendValueKeys = ["total", "cached", "output", "input", "reasoning"];
 
@@ -967,7 +972,7 @@ interface Window {
         return primary || b.tokens - a.tokens || b.requests - a.requests || String(a.name).localeCompare(String(b.name));
       })
       .slice(0, 20);
-    const rows = uiState.sessionsExpanded ? rankedRows : rankedRows.slice(0, 5);
+    const rows = uiState.sessionsExpanded ? rankedRows : rankedRows.slice(0, collapsedSessionLimit);
     const head = `
       <div class="session-head">
         <span>会话</span><span>模型</span><span>${tokenMode ? "Token 消耗" : "调用分布"}</span><span>${tokenMode ? "Token" : "调用数"}</span><span>状态</span>
@@ -988,7 +993,7 @@ interface Window {
       </div>`).join("");
     const toggle = $("toggleSessions");
     if (toggle) {
-      toggle.hidden = rankedRows.length <= 5;
+      toggle.hidden = rankedRows.length <= collapsedSessionLimit;
       toggle.innerHTML = uiState.sessionsExpanded ? "收起会话 <span>↑</span>" : `展开会话 <span>${rankedRows.length}</span>`;
     }
   };
@@ -1000,7 +1005,7 @@ interface Window {
     const matchingRows = query
       ? allRows.filter((row) => String(row.name || "").toLowerCase().includes(query))
       : allRows;
-    const rows = uiState.modelsExpanded ? matchingRows : matchingRows.slice(0, 4);
+    const rows = uiState.modelsExpanded ? matchingRows : matchingRows.slice(0, collapsedModelLimit);
     const head = `
       <div class="session-head" style="grid-template-columns:120px 1fr 72px 62px">
         <span>模型</span><span></span><span>Token 总量</span><span>预估费用</span>
@@ -1020,7 +1025,7 @@ interface Window {
       </div>`).join("");
     const toggle = $("toggleModels");
     if (toggle) {
-      toggle.hidden = allRows.length <= 4;
+      toggle.hidden = allRows.length <= collapsedModelLimit;
       toggle.innerHTML = uiState.modelsExpanded ? "收起模型 <span>↑</span>" : `展开模型 <span>${allRows.length}</span>`;
     }
   };
@@ -1387,13 +1392,60 @@ interface Window {
     renderModels();
   });
 
-  document.querySelectorAll<HTMLElement>(".tab[data-scroll-target]").forEach((tab) => {
+  const dashboardTabIds: DashboardTabId[] = ["overview", "quota", "token", "session", "model", "rate"];
+  const tabButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('.tab[role="tab"][data-tab]'));
+  const tabPanels = Array.from(document.querySelectorAll<HTMLElement>('[role="tabpanel"][data-tab-panel]'));
+  const dashboardTabId = (value: string | undefined | null): DashboardTabId => (
+    dashboardTabIds.includes(value as DashboardTabId) ? value as DashboardTabId : "overview"
+  );
+  const tabFromHash = () => dashboardTabId(decodeURIComponent(window.location.hash.slice(1)));
+  const activateTab = (
+    tabId: DashboardTabId,
+    options: { updateHistory?: boolean; focus?: boolean } = {},
+  ) => {
+    const activeTab = dashboardTabId(tabId);
+    const activeHash = `#${activeTab}`;
+    uiState.activeTab = activeTab;
+
+    tabButtons.forEach((button) => {
+      const selected = button.dataset.tab === activeTab;
+      button.classList.toggle("active", selected);
+      button.setAttribute("aria-selected", String(selected));
+      button.tabIndex = selected ? 0 : -1;
+      if (selected && options.focus) {
+        button.focus();
+        button.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+      }
+    });
+    tabPanels.forEach((panel) => {
+      const selected = panel.dataset.tabPanel === activeTab;
+      panel.hidden = !selected;
+      panel.classList.toggle("active", selected);
+    });
+
+    if (options.updateHistory && window.location.hash !== activeHash) {
+      window.history.pushState(null, "", activeHash);
+    } else if (!options.updateHistory && window.location.hash !== activeHash) {
+      window.history.replaceState(null, "", activeHash);
+    }
+    window.requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+  };
+
+  tabButtons.forEach((tab, index) => {
     tab.addEventListener("click", () => {
-      const target = $(tab.dataset.scrollTarget);
-      if (!target) return;
-      document.querySelectorAll<HTMLElement>(".tab").forEach((item) => item.classList.remove("active"));
-      tab.classList.add("active");
-      target.scrollIntoView({ behavior: "smooth", block: "start" });
+      activateTab(dashboardTabId(tab.dataset.tab), { updateHistory: true });
+    });
+    tab.addEventListener("keydown", (event) => {
+      let targetIndex = index;
+      if (event.key === "ArrowRight") targetIndex = (index + 1) % tabButtons.length;
+      else if (event.key === "ArrowLeft") targetIndex = (index - 1 + tabButtons.length) % tabButtons.length;
+      else if (event.key === "Home") targetIndex = 0;
+      else if (event.key === "End") targetIndex = tabButtons.length - 1;
+      else return;
+      event.preventDefault();
+      activateTab(dashboardTabId(tabButtons[targetIndex]?.dataset.tab), { updateHistory: true, focus: true });
     });
   });
+  window.addEventListener("hashchange", () => activateTab(tabFromHash()));
+  activateTab(tabFromHash());
 })();

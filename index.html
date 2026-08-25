@@ -3,30 +3,31 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CodexScope</title>
+  <title>CodexScope-Live</title>
   <link rel="stylesheet" href="./styles.css">
+  <script src="./theme.js"></script>
 </head>
 <body>
   <div class="app">
     <header class="topbar">
-      <div class="brand">
-        <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none">
-            <path d="M12 2.5 20.2 7v9.2L12 21 3.8 16.2V7L12 2.5Z" fill="currentColor" opacity=".25"/>
-            <path d="M12 3.5 19 7.4v7.9l-7 4.1-7-4.1V7.4l7-3.9Z" fill="#fff"/>
-            <path d="M12 3.5 19 7.4l-7 4.2-7-4.2 7-3.9Z" fill="#1668f2"/>
+      <div class="brand" aria-label="CodexScope-Live">
+        <span class="brand-mark" data-brand-logo aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none">
+            <path class="brand-orbit" d="M23.1 9.2A9.4 9.4 0 1 0 23 22.9"/>
+            <path class="brand-pulse" d="M16.4 16h3l1.6-3.1 2.3 6 1.6-2.9H28"/>
+            <circle class="brand-live-dot" cx="24.6" cy="7.2" r="2.4"/>
           </svg>
         </span>
-        <span>CodexScope</span>
+        <span class="brand-wordmark"><span>CodexScope</span><b>Live</b></span>
       </div>
 
-      <nav class="tabs" aria-label="主导航">
-        <button class="tab active" type="button" data-scroll-target="overview">总览</button>
-        <button class="tab" type="button" data-scroll-target="quotaPanel">额度</button>
-        <button class="tab" type="button" data-scroll-target="tokenPanel">Token</button>
-        <button class="tab" type="button" data-scroll-target="sessionPanel">会话</button>
-        <button class="tab" type="button" data-scroll-target="modelPanel">模型</button>
-        <button class="tab" type="button" data-scroll-target="quotaPanel">速率</button>
+      <nav class="tabs" role="tablist" aria-label="数据页面">
+        <button id="tab-overview" class="tab active" type="button" role="tab" aria-selected="true" aria-controls="tab-overview-panel" tabindex="0" data-tab="overview">总览</button>
+        <button id="tab-quota" class="tab" type="button" role="tab" aria-selected="false" aria-controls="tab-quota-panel" tabindex="-1" data-tab="quota">额度</button>
+        <button id="tab-token" class="tab" type="button" role="tab" aria-selected="false" aria-controls="tab-token-panel" tabindex="-1" data-tab="token">Token</button>
+        <button id="tab-session" class="tab" type="button" role="tab" aria-selected="false" aria-controls="tab-session-panel" tabindex="-1" data-tab="session">会话</button>
+        <button id="tab-model" class="tab" type="button" role="tab" aria-selected="false" aria-controls="tab-model-panel" tabindex="-1" data-tab="model">模型</button>
+        <button id="tab-rate" class="tab" type="button" role="tab" aria-selected="false" aria-controls="tab-rate-panel" tabindex="-1" data-tab="rate">速率</button>
       </nav>
 
       <div class="actions">
@@ -53,6 +54,90 @@
             <input id="endDate" type="date" aria-label="结束日期">
           </div>
         </div>
+        <div class="theme-picker">
+          <button id="themeToggle" class="theme-toggle" type="button" aria-label="打开外观设置" aria-haspopup="true" aria-expanded="false" aria-controls="themeMenu" title="外观设置">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle class="theme-dot-primary" cx="8" cy="8" r="3.2"/>
+              <circle class="theme-dot-secondary" cx="16" cy="8" r="3.2"/>
+              <circle class="theme-dot-tertiary" cx="8" cy="16" r="3.2"/>
+              <circle class="theme-dot-fourth" cx="16" cy="16" r="3.2"/>
+            </svg>
+          </button>
+          <div id="themeMenu" class="theme-menu" role="dialog" aria-label="外观设置" popover="auto">
+            <div class="theme-menu-heading">
+              <span>外观设置</span>
+              <small>仅保存在当前浏览器</small>
+            </div>
+            <section class="appearance-section">
+              <h3>明暗模式</h3>
+              <div class="mode-options" role="radiogroup" aria-label="明暗模式">
+                <button class="mode-option" type="button" role="radio" aria-checked="false" data-mode-option="light">
+                  <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="3.3" stroke="currentColor" stroke-width="1.7"/><path d="M10 1.7v2M10 16.3v2M1.7 10h2M16.3 10h2M4.1 4.1l1.4 1.4M14.5 14.5l1.4 1.4M15.9 4.1l-1.4 1.4M5.5 14.5l-1.4 1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                  <span>浅色</span>
+                </button>
+                <button class="mode-option" type="button" role="radio" aria-checked="false" data-mode-option="dark">
+                  <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M16.6 12.7A7 7 0 0 1 7.3 3.4 7 7 0 1 0 16.6 12.7Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+                  <span>深色</span>
+                </button>
+              </div>
+            </section>
+
+            <section class="appearance-section">
+              <h3>调色板</h3>
+              <div class="palette-options" role="radiogroup" aria-label="调色板">
+                <button class="palette-option" type="button" role="radio" aria-checked="false" data-theme-option="ocean" aria-label="海蓝">
+                  <span class="theme-preview theme-preview-ocean" aria-hidden="true"><i></i><i></i><i></i></span><span>海蓝</span>
+                </button>
+                <button class="palette-option" type="button" role="radio" aria-checked="false" data-theme-option="emerald" aria-label="翡翠">
+                  <span class="theme-preview theme-preview-emerald" aria-hidden="true"><i></i><i></i><i></i></span><span>翡翠</span>
+                </button>
+                <button class="palette-option" type="button" role="radio" aria-checked="false" data-theme-option="violet" aria-label="紫晶">
+                  <span class="theme-preview theme-preview-violet" aria-hidden="true"><i></i><i></i><i></i></span><span>紫晶</span>
+                </button>
+                <button class="palette-option" type="button" role="radio" aria-checked="false" data-theme-option="sunset" aria-label="日落">
+                  <span class="theme-preview theme-preview-sunset" aria-hidden="true"><i></i><i></i><i></i></span><span>日落</span>
+                </button>
+              </div>
+            </section>
+
+            <section class="appearance-section">
+              <h3>材质风格</h3>
+              <div class="style-options" role="radiogroup" aria-label="材质风格">
+                <button class="style-option" type="button" role="radio" aria-checked="false" data-style-option="acrylic">
+                  <span class="material-preview material-acrylic" aria-hidden="true"><i></i></span><span><b>亚克力</b><small>柔焦与层次</small></span>
+                </button>
+                <button class="style-option" type="button" role="radio" aria-checked="false" data-style-option="liquid">
+                  <span class="material-preview material-liquid" aria-hidden="true"><i></i></span><span><b>液态玻璃</b><small>高光与流动感</small></span>
+                </button>
+                <button class="style-option" type="button" role="radio" aria-checked="false" data-style-option="matte">
+                  <span class="material-preview material-matte" aria-hidden="true"><i></i></span><span><b>哑光</b><small>纯净、低干扰</small></span>
+                </button>
+                <button class="style-option" type="button" role="radio" aria-checked="false" data-style-option="translucent">
+                  <span class="material-preview material-translucent" aria-hidden="true"><i></i></span><span><b>半透明</b><small>轻盈、通透</small></span>
+                </button>
+              </div>
+            </section>
+
+            <section class="appearance-section background-settings">
+              <div class="appearance-section-title"><h3>自定义背景</h3><span id="backgroundStatus" aria-live="polite">未设置</span></div>
+              <div class="background-actions">
+                <label class="background-upload" for="backgroundInput">
+                  <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 13.8 6.8 10l2.8 2.8 2-2 5.4 5.4M13.5 6.5h.01" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><rect x="2.5" y="3" width="15" height="14" rx="2.5" stroke="currentColor" stroke-width="1.5"/></svg>
+                  <span>选择图片</span>
+                </label>
+                <input id="backgroundInput" class="sr-only" type="file" accept="image/*">
+                <button id="clearBackground" class="background-clear" type="button" disabled>移除</button>
+              </div>
+              <div class="background-sliders">
+                <label for="backgroundOpacity"><span>遮罩强度</span><output id="backgroundOpacityValue">58%</output></label>
+                <input id="backgroundOpacity" type="range" min="20" max="90" value="58">
+                <label for="backgroundBlur"><span>背景模糊</span><output id="backgroundBlurValue">0px</output></label>
+                <input id="backgroundBlur" type="range" min="0" max="20" value="0">
+              </div>
+              <p class="background-note">图片仅保存在当前浏览器，不会写入仓库或上传网络。</p>
+            </section>
+          </div>
+        </div>
         <div class="sync">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/>
@@ -64,7 +149,12 @@
     </header>
 
     <main>
-      <section id="overview" class="grid" aria-label="Codex 用量总览">
+      <div id="dashboardTabs" class="tab-pages">
+        <section id="tab-token-panel" class="tab-panel tab-panel-token" role="tabpanel" aria-labelledby="tab-token" data-tab-panel="token" hidden>
+          <header class="tab-page-heading">
+            <div><span>Token Analytics</span><h1>Token 用量</h1></div>
+            <p>按时间观察输入、缓存、输出和推理 Token 的累计与分时变化。</p>
+          </header>
         <article id="tokenPanel" class="panel">
           <div class="panel-title">
             <div class="trend-heading">
@@ -96,7 +186,13 @@
             </svg>
           </div>
         </article>
+        </section>
 
+        <section id="tab-quota-panel" class="tab-panel tab-panel-quota" role="tabpanel" aria-labelledby="tab-quota" data-tab-panel="quota" hidden>
+          <header class="tab-page-heading">
+            <div><span>Quota &amp; Risk</span><h1>额度状态</h1></div>
+            <p>集中查看短窗口、周限额、重置时间和当前风险状态。</p>
+          </header>
         <article id="quotaPanel" class="panel">
           <div class="panel-title">
             <h2>额度与风险</h2>
@@ -127,7 +223,13 @@
             </div>
           </div>
         </article>
+        </section>
 
+        <section id="tab-overview-panel" class="tab-panel tab-panel-overview active" role="tabpanel" aria-labelledby="tab-overview" data-tab-panel="overview">
+          <header class="tab-page-heading">
+            <div><span>Workspace Overview</span><h1>Codex 用量总览</h1></div>
+            <p>用关键指标快速判断当前筛选区间的用量规模、调用质量和缓存效率。</p>
+          </header>
         <section class="metrics">
           <article class="metric metric-primary">
             <h3>Token 总量</h3>
@@ -144,7 +246,7 @@
             <h3>调用量</h3>
             <div id="requestCount" class="metric-value">--</div>
             <svg class="spark" viewBox="0 0 126 42" aria-hidden="true">
-              <path id="requestSpark" fill="none" stroke="#2f80ff" stroke-width="2.2" stroke-linecap="round"/>
+              <path id="requestSpark" fill="none" stroke="var(--blue-2)" stroke-width="2.2" stroke-linecap="round"/>
             </svg>
             <div class="metric-footer">
               <span>成功率 <strong id="successRate">--</strong></span>
@@ -155,7 +257,7 @@
             <h3>峰值速率</h3>
             <div><span id="peakRate" class="metric-value">--</span><span class="metric-unit">TPM</span></div>
             <svg class="spark" viewBox="0 0 126 42" aria-hidden="true">
-              <path id="peakSpark" fill="none" stroke="#2f80ff" stroke-width="2.2" stroke-linecap="round"/>
+              <path id="peakSpark" fill="none" stroke="var(--blue-2)" stroke-width="2.2" stroke-linecap="round"/>
             </svg>
             <div class="metric-footer">
               <span>当前筛选区间峰值</span>
@@ -166,11 +268,17 @@
             <div id="cacheHit" class="metric-value">--</div>
             <div class="delta">缓存<span>输入 token</span></div>
             <svg class="spark small" viewBox="0 0 126 36" aria-hidden="true">
-              <path id="cacheSpark" fill="none" stroke="#2f80ff" stroke-width="2" stroke-linecap="round"/>
+              <path id="cacheSpark" fill="none" stroke="var(--blue-2)" stroke-width="2" stroke-linecap="round"/>
             </svg>
           </article>
         </section>
+        </section>
 
+        <section id="tab-rate-panel" class="tab-panel tab-panel-rate" role="tabpanel" aria-labelledby="tab-rate" data-tab-panel="rate" hidden>
+          <header class="tab-page-heading">
+            <div><span>Rate Timeline</span><h1>速率分布</h1></div>
+            <p>按时间桶查看调用密度或 Token 吞吐，快速定位高峰时段。</p>
+          </header>
         <section id="distributionPanel" class="coverage distribution-panel" aria-label="调用和 Token 分布">
           <div class="panel-title distribution-title">
             <div class="dist-heading">
@@ -186,8 +294,13 @@
           </div>
           <div id="distributionChart" class="distribution-chart"></div>
         </section>
+        </section>
 
-        <section class="lower">
+        <section id="tab-session-panel" class="tab-panel tab-panel-session" role="tabpanel" aria-labelledby="tab-session" data-tab-panel="session" hidden>
+          <header class="tab-page-heading">
+            <div><span>Session Explorer</span><h1>会话排行</h1></div>
+            <p>按 Token 或调用量查找最活跃的本地 Codex 会话。</p>
+          </header>
           <article id="sessionPanel" class="panel">
             <div class="panel-title session-title">
               <h3>会话排行</h3>
@@ -205,7 +318,13 @@
             </div>
             <button id="toggleSessions" class="link" type="button" hidden>展开会话 <span>↓</span></button>
           </article>
+        </section>
 
+        <section id="tab-model-panel" class="tab-panel tab-panel-model" role="tabpanel" aria-labelledby="tab-model" data-tab-panel="model" hidden>
+          <header class="tab-page-heading">
+            <div><span>Model &amp; Cost</span><h1>模型与费用</h1></div>
+            <p>比较模型用量、首 Token 延迟和当前筛选区间的费用估算。</p>
+          </header>
           <article id="modelPanel" class="panel">
             <div class="panel-title"><h3>模型排行</h3></div>
             <label class="rank-search"><span class="sr-only">搜索模型</span><input id="modelSearch" type="search" placeholder="搜索模型" autocomplete="off"></label>
@@ -251,7 +370,7 @@
             </div>
           </article>
         </section>
-      </section>
+      </div>
     </main>
   </div>
   <script src="./data.sample.js"></script>
