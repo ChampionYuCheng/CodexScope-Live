@@ -1,10 +1,11 @@
 use codexscope_live::{
-    content_type, data_event, safe_relative_path, session_signature, ServerConfig,
+    content_type, dashboard_url, data_event, is_codexscope_health_response, safe_relative_path,
+    session_signature, ServerConfig,
 };
 use std::env;
 use std::fs;
 use std::io::{self, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{mpsc, Arc, Mutex};
@@ -21,6 +22,7 @@ struct AppState {
 
 fn main() {
     let config = ServerConfig::from_args(env::args());
+    let dashboard_url = dashboard_url(config.port);
     if let Err(error) = fs::create_dir_all(&config.root) {
         eprintln!("无法准备面板目录 {}: {error}", config.root.display());
         std::process::exit(1);
@@ -28,8 +30,17 @@ fn main() {
 
     let listener = match TcpListener::bind(("127.0.0.1", config.port)) {
         Ok(listener) => listener,
+        Err(error)
+            if error.kind() == io::ErrorKind::AddrInUse && existing_live_server(config.port) =>
+        {
+            println!("CodexScope-Live 已在运行: {dashboard_url}");
+            if config.open_browser {
+                let _ = open_dashboard(&dashboard_url);
+            }
+            return;
+        }
         Err(error) => {
-            eprintln!("无法监听 http://127.0.0.1:{}: {error}", config.port);
+            eprintln!("无法监听 {dashboard_url}: {error}");
             std::process::exit(1);
         }
     };
@@ -45,10 +56,18 @@ fn main() {
     let monitor_config = config.clone();
     thread::spawn(move || monitor_sessions(monitor_config, monitor_state));
 
-    println!(
-        "CodexScope live dashboard: http://127.0.0.1:{}",
-        config.port
-    );
+    if !config.sessions.is_dir() {
+        eprintln!(
+            "未找到 Codex 会话目录 {}，暂时显示示例数据。运行 Codex 后会自动检测。",
+            config.sessions.display()
+        );
+    }
+    println!("CodexScope-Live: {dashboard_url}");
+    if config.open_browser {
+        if let Err(error) = open_dashboard(&dashboard_url) {
+            eprintln!("无法自动打开浏览器，请手动访问 {dashboard_url}: {error}");
+        }
+    }
     loop {
         match listener.accept() {
             Ok((stream, _)) => {
@@ -61,6 +80,41 @@ fn main() {
             Err(error) => eprintln!("接受浏览器连接失败: {error}"),
         }
     }
+}
+
+fn existing_live_server(port: u16) -> bool {
+    let address = SocketAddrV4::new(Ipv4Addr::LOCALHOST, port);
+    let Ok(mut stream) = TcpStream::connect_timeout(&address.into(), Duration::from_millis(500))
+    else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+    if stream
+        .write_all(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .is_err()
+    {
+        return false;
+    }
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).is_ok() && is_codexscope_health_response(&response)
+}
+
+#[cfg(target_os = "windows")]
+fn open_dashboard(url: &str) -> io::Result<()> {
+    Command::new("cmd")
+        .args(["/C", "start", "", url])
+        .spawn()
+        .map(|_| ())
+}
+
+#[cfg(target_os = "macos")]
+fn open_dashboard(url: &str) -> io::Result<()> {
+    Command::new("open").arg(url).spawn().map(|_| ())
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn open_dashboard(url: &str) -> io::Result<()> {
+    Command::new("xdg-open").arg(url).spawn().map(|_| ())
 }
 
 fn monitor_sessions(config: ServerConfig, state: AppState) {

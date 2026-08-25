@@ -11,6 +11,7 @@ pub struct ServerConfig {
     pub generator: Option<PathBuf>,
     pub port: u16,
     pub interval_ms: u64,
+    pub open_browser: bool,
 }
 
 impl ServerConfig {
@@ -19,11 +20,14 @@ impl ServerConfig {
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        let mut root = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let working_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let executable = env::current_exe().ok();
+        let mut root = default_dashboard_root(&working_dir, executable.as_deref());
         let mut sessions = default_sessions_path();
         let mut generator = None;
         let mut port = 48173;
         let mut interval_ms = 1000;
+        let mut open_browser = true;
         let mut iter = args.into_iter().skip(1).map(|arg| arg.as_ref().to_owned());
 
         while let Some(arg) = iter.next() {
@@ -58,6 +62,7 @@ impl ServerConfig {
                         }
                     }
                 }
+                "--no-open" => open_browser = false,
                 _ => {}
             }
         }
@@ -68,8 +73,27 @@ impl ServerConfig {
             generator,
             port,
             interval_ms,
+            open_browser,
         }
     }
+}
+
+pub fn default_dashboard_root(working_dir: &Path, executable: Option<&Path>) -> PathBuf {
+    executable
+        .and_then(Path::parent)
+        .filter(|directory| directory.join("index.html").is_file())
+        .unwrap_or(working_dir)
+        .to_path_buf()
+}
+
+pub fn dashboard_url(port: u16) -> String {
+    format!("http://127.0.0.1:{port}/")
+}
+
+pub fn is_codexscope_health_response(response: &[u8]) -> bool {
+    response
+        .windows(br#"{"ok":true,"mode":"local"}"#.len())
+        .any(|window| window == br#"{"ok":true,"mode":"local"}"#)
 }
 
 fn default_sessions_path() -> PathBuf {
@@ -187,6 +211,59 @@ mod tests {
         assert_eq!(config.root, PathBuf::from("D:/CodexScope"));
         assert_eq!(config.port, 4321);
         assert_eq!(config.interval_ms, 750);
+        assert!(config.open_browser);
+    }
+
+    #[test]
+    fn no_open_argument_disables_browser_launch() {
+        let config = ServerConfig::from_args(["codexscope-live", "--no-open"]);
+        assert!(!config.open_browser);
+    }
+
+    #[test]
+    fn portable_root_prefers_executable_directory_with_dashboard() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_nanos();
+        let sandbox = std::env::temp_dir().join(format!("codexscope-root-{unique}"));
+        let executable_dir = sandbox.join("portable");
+        let working_dir = sandbox.join("working");
+        fs::create_dir_all(&executable_dir).unwrap();
+        fs::create_dir_all(&working_dir).unwrap();
+        fs::write(executable_dir.join("index.html"), b"dashboard").unwrap();
+        let executable = executable_dir.join("CodexScope-Live.exe");
+
+        let root = default_dashboard_root(&working_dir, Some(&executable));
+
+        let _ = fs::remove_dir_all(&sandbox);
+        assert_eq!(root, executable_dir);
+    }
+
+    #[test]
+    fn development_root_falls_back_to_working_directory() {
+        let working_dir = PathBuf::from("D:/CodexScope-Live");
+        let executable =
+            PathBuf::from("D:/CodexScope-Live/live-server/target/debug/codexscope-live.exe");
+
+        let root = default_dashboard_root(&working_dir, Some(&executable));
+
+        assert_eq!(root, working_dir);
+    }
+
+    #[test]
+    fn builds_loopback_dashboard_url() {
+        assert_eq!(dashboard_url(48173), "http://127.0.0.1:48173/");
+    }
+
+    #[test]
+    fn recognizes_only_codexscope_health_response() {
+        assert!(is_codexscope_health_response(
+            b"HTTP/1.1 200 OK\r\n\r\n{\"ok\":true,\"mode\":\"local\"}"
+        ));
+        assert!(!is_codexscope_health_response(
+            b"HTTP/1.1 200 OK\r\n\r\nother service"
+        ));
     }
 
     #[test]

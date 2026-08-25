@@ -51,6 +51,18 @@ The project has two modes:
 
 ## Quick start
 
+### Windows portable live dashboard (recommended)
+
+Regular users should download `CodexScope-Live-Windows-x64.zip` from [GitHub Releases](https://github.com/ChampionYuCheng/CodexScope-Live/releases). Do not use GitHub's automatically generated `Source code` archives.
+
+1. Extract the entire ZIP.
+2. Double-click `CodexScope-Live.exe`.
+3. The app opens `http://127.0.0.1:48173/` automatically.
+
+The portable package includes the Rust live server and the precompiled Go data generator. It does not require Node.js, Go, Rust, or manually configured environment variables. It automatically reads `%USERPROFILE%/.codex/sessions`; if no local Codex session exists yet, the dashboard initially shows sample data.
+
+Windows SmartScreen may report an unknown publisher because the executable is not commercially code-signed. Confirm that the download came from this repository's Release page and optionally verify it against the matching `.sha256` file before running it.
+
 ### Preview the dashboard
 
 No toolchain is required to preview the bundled sample data:
@@ -60,7 +72,7 @@ No toolchain is required to preview the bundled sample data:
 
 When opened with `file://`, the page works as a static preview. Live refresh is unavailable in this mode.
 
-### Run the live dashboard on Windows
+### Run the Windows live dashboard from source
 
 The Windows launcher starts the local Rust server at `http://127.0.0.1:48173/`:
 
@@ -68,7 +80,7 @@ The Windows launcher starts the local Rust server at `http://127.0.0.1:48173/`:
 windows/open-dashboard.cmd
 ~~~
 
-Double-click the script, or run it from a terminal. The launcher uses a local `codexscope-live.exe` when one is available. Otherwise, it falls back to `cargo run`.
+Double-click the script, or run it from a terminal. The launcher uses a local `codexscope-live.exe` when one is available. Otherwise, it falls back to `cargo run`. This path is intended for developers, not regular users.
 
 For a source checkout, install:
 
@@ -100,6 +112,7 @@ Useful options:
 --generator <path>     Explicit path to a prebuilt data generator
 --port <number>        Local HTTP port; defaults to 48173
 --interval-ms <number> Polling interval; defaults to 1000 ms
+--no-open              Start the server without opening a browser
 ~~~
 
 If neither a prebuilt generator nor Go is available, the server can still serve the dashboard, but it cannot create fresh local exports.
@@ -152,13 +165,14 @@ npm run build:live
 
 The release binary is written to `live-server/target/release/`. On Windows, the launcher also looks for `codexscope-live.exe` in the repository root or in that release directory.
 
-The existing release script builds the platform packages and precompiled Go generator:
+Build the Windows x64 portable package, then launch and verify the final packaged executable:
 
-~~~bash
-npm run release:local
+~~~powershell
+npm.cmd run release:windows
+npm.cmd run check:release:windows
 ~~~
 
-The current release script does not bundle the Rust live server. Use the source-checkout instructions above for the live dashboard, or extend the release packaging step before distributing a live-enabled package.
+The artifacts are written to `dist/CodexScope-Live-Windows-x64.zip` and a matching `.sha256` file. The ZIP contains the Rust live server, Go data generator, complete frontend assets, MIT license, and both README files, so end users do not need a development toolchain. The existing `npm run release:local` command remains available for the legacy cross-platform static-package flow.
 
 ## Data flow
 
@@ -190,7 +204,9 @@ When available, the dashboard retrieves the USD/CNY rate from the Frankfurter AP
 - `data.sample.js`: bundled sample data
 - `macos/open-dashboard.command`: macOS data-generation launcher
 - `windows/open-dashboard.cmd`: Windows live-server launcher
-- `scripts/build-release.sh`: platform release-package builder
+- `scripts/build-release.sh`: legacy cross-platform static-package builder
+- `scripts/build-windows-release.ps1`: Windows x64 portable live-package builder
+- `verify_portable_release.js`: launches the final packaged executable and verifies its health endpoint and required assets
 - `verify_responsive.js`: Playwright layout and interaction audit
 - `verify_live_data.js`: Playwright regression check for recovery from startup sample data to the real generated payload
 - `verify_tabs.js`: Playwright regression check for semantic tabs, URL state, refresh, and keyboard navigation

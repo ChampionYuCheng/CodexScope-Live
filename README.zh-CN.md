@@ -51,6 +51,18 @@ CodexScope Live 读取本机 Codex JSONL 会话日志中已经存在的用量元
 
 ## 快速开始
 
+### Windows 免安装实时面板（推荐）
+
+普通用户请从 [GitHub Releases](https://github.com/ChampionYuCheng/CodexScope-Live/releases) 下载 `CodexScope-Live-Windows-x64.zip`，不要下载 GitHub 自动生成的 `Source code` 压缩包。
+
+1. 解压整个 ZIP。
+2. 双击 `CodexScope-Live.exe`。
+3. 程序自动打开 `http://127.0.0.1:48173/`。
+
+便携包已经包含 Rust 实时服务和 Go 数据生成器，不需要安装 Node.js、Go、Rust，也不需要配置环境变量。程序自动读取当前 Windows 用户的 `%USERPROFILE%/.codex/sessions`；如果还没有本地 Codex 会话，则先显示示例数据。
+
+Windows SmartScreen 可能因为程序暂未进行商业代码签名而显示“未知发布者”。请确认下载地址是本仓库的 Release，并可使用同名 `.sha256` 文件核对压缩包后再选择运行。
+
 ### 预览面板
 
 只查看内置示例数据时不需要安装开发工具：
@@ -60,7 +72,7 @@ CodexScope Live 读取本机 Codex JSONL 会话日志中已经存在的用量元
 
 通过 `file://` 打开时，页面会作为静态预览运行；这种方式不支持实时刷新。
 
-### 在 Windows 上运行实时面板
+### 从源码运行 Windows 实时面板
 
 Windows 启动脚本会在 `http://127.0.0.1:48173/` 启动本地 Rust 服务：
 
@@ -68,7 +80,7 @@ Windows 启动脚本会在 `http://127.0.0.1:48173/` 启动本地 Rust 服务：
 windows/open-dashboard.cmd
 ~~~
 
-可以双击脚本，也可以在终端中运行。脚本会优先使用本地已有的 `codexscope-live.exe`；找不到时回退到 `cargo run`。
+可以双击脚本，也可以在终端中运行。脚本会优先使用本地已有的 `codexscope-live.exe`；找不到时回退到 `cargo run`。此方式面向开发者，不是普通用户推荐入口。
 
 从源码运行时，需要准备：
 
@@ -100,6 +112,7 @@ cargo run --manifest-path ./live-server/Cargo.toml -- --root . --port 48173
 --generator <path>     指定预编译数据生成器路径
 --port <number>        本地 HTTP 端口，默认是 48173
 --interval-ms <number> 轮询间隔，默认是 1000 ms
+--no-open              启动服务但不自动打开浏览器
 ~~~
 
 如果既没有预编译生成器，也没有安装 Go，服务仍然可以托管面板，但无法生成最新的本地用量导出。
@@ -152,13 +165,14 @@ npm run build:live
 
 Release 二进制会生成在 `live-server/target/release/`。在 Windows 上，启动脚本也会检查仓库根目录以及该目录中的 `codexscope-live.exe`。
 
-现有 Release 脚本负责构建平台压缩包和预编译 Go 生成器：
+构建 Windows x64 免安装包，并从最终目录实际启动验证：
 
-~~~bash
-npm run release:local
+~~~powershell
+npm.cmd run release:windows
+npm.cmd run check:release:windows
 ~~~
 
-当前 Release 脚本还不会把 Rust 实时服务打进压缩包。需要实时功能时，请使用上面的源码运行方式，或者在发布前扩展打包步骤。
+产物位于 `dist/CodexScope-Live-Windows-x64.zip`，同时生成同名 `.sha256` 校验文件。压缩包包含 Rust 实时服务、Go 数据生成器、完整前端资源、MIT 许可证和双语 README；普通用户不需要开发环境。原有 `npm run release:local` 继续保留给旧的跨平台静态包流程。
 
 ## 数据流
 
@@ -190,7 +204,9 @@ npm run release:local
 - `data.sample.js`：内置示例数据
 - `macos/open-dashboard.command`：macOS 数据生成启动脚本
 - `windows/open-dashboard.cmd`：Windows 实时服务启动脚本
-- `scripts/build-release.sh`：分平台 Release 包构建脚本
+- `scripts/build-release.sh`：旧的跨平台静态 Release 包构建脚本
+- `scripts/build-windows-release.ps1`：Windows x64 免安装实时包构建脚本
+- `verify_portable_release.js`：从最终发布目录启动 EXE 并验证健康检查与关键资源
 - `verify_responsive.js`：基于 Playwright 的布局和交互检查
 - `verify_live_data.js`：检查首次生成期间从示例数据自动恢复为真实数据的 Playwright 回归脚本
 - `verify_tabs.js`：检查语义化 Tab、URL 状态、刷新恢复和键盘导航的 Playwright 回归脚本
