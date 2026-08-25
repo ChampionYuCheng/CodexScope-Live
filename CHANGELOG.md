@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.2.0 - 2026-08-25
+
+- Protected local dashboard routes with a cryptographically random per-run access path and same-origin browser resource policy.
+- Added strict browser security headers and removed the cross-origin wildcard from the SSE endpoint.
+- Restricted the Rust server to an explicit runtime asset allowlist instead of exposing arbitrary files from the application directory.
+- Moved generated `data.js`, `data.raw.js`, cache, and stamp files to the platform user-data directory; Windows uses `%LOCALAPPDATA%/CodexScope-Live` by default.
+- Added `--data-dir` for explicit private runtime-data placement.
+- Reported pending, successful, and failed generator states to the browser so an open SSE connection is no longer presented as successful data generation.
+- Reported a missing `/status` endpoint as an outdated local service instead of incorrectly calling it a generator failure.
+- Added protocol and configuration fingerprints to instance health checks, preventing an incompatible or differently configured old process from being silently reused.
+- Changed the source-mode Windows launcher to let Cargo validate and rebuild current release-mode sources before falling back to a cached binary.
+- Pinned portable builds to Rust `x86_64-pc-windows-msvc` and Go `windows/amd64`.
+- Versioned the Windows artifact as `CodexScope-Live-v0.2.0-Windows-x64.zip`.
+- Reworked release verification to extract and test the final ZIP, validate SHA256 and PE architecture, parse a real JSONL fixture, check install-directory immutability, and prove cross-origin `data.js` loading is blocked.
+- Fixed the dashboard screenshot syntax and documented the private data directory, security redirect, checksum workflow, and unsigned-executable boundary in both READMEs.
+
 ## v0.1.9 - 2026-05-09
 
 - Switched generated exports to compact `recordsV2` rows and delta timestamps, with catalogs kept in the raw sidecar to reduce first-load `data.js` size.

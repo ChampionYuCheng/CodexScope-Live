@@ -4,17 +4,18 @@ setlocal
 cd /d "%~dp0.."
 set "ROOT=%cd%"
 set "PORT=48173"
+
+where cargo >nul 2>nul
+if %errorlevel%==0 (
+  start "CodexScope Live Server" /b cargo run --release --manifest-path "%ROOT%\live-server\Cargo.toml" -- --root "%ROOT%" --port %PORT%
+  exit /b 0
+)
+
 set "LIVE_EXE=%ROOT%\codexscope-live.exe"
 if not exist "%LIVE_EXE%" set "LIVE_EXE=%ROOT%\live-server\target\release\codexscope-live.exe"
 
 if exist "%LIVE_EXE%" (
   start "CodexScope Live Server" /b "%LIVE_EXE%" --root "%ROOT%" --port %PORT%
-  exit /b 0
-)
-
-where cargo >nul 2>nul
-if %errorlevel%==0 (
-  start "CodexScope Live Server" /b cargo run --manifest-path "%ROOT%\live-server\Cargo.toml" -- --root "%ROOT%" --port %PORT%
   exit /b 0
 )
 

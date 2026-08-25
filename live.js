@@ -9,6 +9,8 @@
   const initialGeneratedAt = window.CODEXSCOPE_DATA?.generatedAt || null;
   let enabled = localStorage.getItem("codexscope-live-enabled") !== "false";
   let reloading = false;
+  let streamConnected = false;
+  let generationState = "pending";
 
   const setStatus = (state, text) => {
     status.className = `live-status ${state}`;
@@ -18,6 +20,46 @@
   const updateToggle = () => {
     toggle.textContent = enabled ? "暂停实时" : "启用实时";
     toggle.setAttribute("aria-pressed", String(enabled));
+  };
+
+  const renderLiveStatus = () => {
+    if (!streamConnected) {
+      setStatus("connecting", "连接实时服务…");
+      return;
+    }
+    if (generationState === "error") {
+      setStatus("offline", "数据生成失败，请查看程序窗口");
+      return;
+    }
+    if (generationState === "incompatible") {
+      setStatus("offline", "服务版本过旧，请重新启动");
+      return;
+    }
+    if (generationState === "pending") {
+      setStatus("connecting", "正在生成本地数据…");
+      return;
+    }
+    setStatus("connected", enabled ? "实时监控中" : "实时监控已暂停");
+  };
+
+  const refreshGenerationStatus = async () => {
+    try {
+      const response = await fetch(`status?codexscope-status=${Date.now()}`, { cache: "no-store" });
+      if (response.status === 404) {
+        generationState = "incompatible";
+        renderLiveStatus();
+        return;
+      }
+      if (!response.ok) throw new Error(`status ${response.status}`);
+      const payload = await response.json();
+      generationState = ["pending", "ok", "error"].includes(payload.state)
+        ? payload.state
+        : "error";
+      renderLiveStatus();
+    } catch {
+      generationState = "error";
+      renderLiveStatus();
+    }
   };
 
   const reloadPage = () => {
@@ -33,6 +75,7 @@
     localStorage.setItem("codexscope-live-enabled", String(enabled));
     updateToggle();
     if (!isServerMode) setStatus("static", "静态预览");
+    else renderLiveStatus();
   });
   updateToggle();
 
@@ -56,7 +99,7 @@
   const probeForGeneratedData = async () => {
     if (reloading) return;
     try {
-      const response = await fetch(`/data.js?codexscope-ready=${Date.now()}`, { cache: "no-store" });
+      const response = await fetch(`data.js?codexscope-ready=${Date.now()}`, { cache: "no-store" });
       if (!response.ok) return;
       const source = await response.text();
       if (!source.includes("window.CODEXSCOPE_DATA")) return;
@@ -77,11 +120,23 @@
     void probeForGeneratedData();
   }, 750);
 
-  setStatus("connecting", "连接实时服务…");
-  const events = new EventSource("/events");
-  events.onopen = () => setStatus("connected", enabled ? "实时监控中" : "实时监控已暂停");
-  events.onerror = () => setStatus("offline", "实时服务断开，正在重试…");
+  renderLiveStatus();
+  const events = new EventSource("events");
+  events.onopen = () => {
+    streamConnected = true;
+    void refreshGenerationStatus();
+  };
+  events.onerror = () => {
+    streamConnected = false;
+    setStatus("offline", "实时服务断开，正在重试…");
+  };
   events.addEventListener("data", () => {
+    generationState = "ok";
     if (enabled) reloadPage();
+    else renderLiveStatus();
+  });
+  events.addEventListener("generation-error", () => {
+    generationState = "error";
+    renderLiveStatus();
   });
 })();

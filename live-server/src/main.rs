@@ -1,6 +1,8 @@
 use codexscope_live::{
-    content_type, dashboard_url, data_event, is_codexscope_health_response, safe_relative_path,
-    session_signature, ServerConfig,
+    configuration_signature, content_type, dashboard_url, data_event, generate_access_token,
+    generation_error_event, generation_status_json, health_response, is_compatible_health_response,
+    is_public_asset, private_route, safe_relative_path, security_headers, session_signature,
+    GenerationStatus, ServerConfig,
 };
 use std::env;
 use std::fs;
@@ -17,6 +19,10 @@ type Clients = Arc<Mutex<Vec<mpsc::Sender<String>>>>;
 #[derive(Clone)]
 struct AppState {
     root: PathBuf,
+    data_dir: PathBuf,
+    access_token: String,
+    configuration_signature: String,
+    generation_status: Arc<Mutex<GenerationStatus>>,
     clients: Clients,
 }
 
@@ -27,17 +33,34 @@ fn main() {
         eprintln!("无法准备面板目录 {}: {error}", config.root.display());
         std::process::exit(1);
     }
+    if let Err(error) = fs::create_dir_all(&config.data_dir) {
+        eprintln!(
+            "无法准备本地数据目录 {}: {error}",
+            config.data_dir.display()
+        );
+        std::process::exit(1);
+    }
+    let instance_signature =
+        configuration_signature(&config.root, &config.sessions, &config.data_dir);
 
     let listener = match TcpListener::bind(("127.0.0.1", config.port)) {
         Ok(listener) => listener,
         Err(error)
-            if error.kind() == io::ErrorKind::AddrInUse && existing_live_server(config.port) =>
+            if error.kind() == io::ErrorKind::AddrInUse
+                && existing_live_server(config.port, &instance_signature) =>
         {
             println!("CodexScope-Live 已在运行: {dashboard_url}");
             if config.open_browser {
                 let _ = open_dashboard(&dashboard_url);
             }
             return;
+        }
+        Err(error) if error.kind() == io::ErrorKind::AddrInUse => {
+            eprintln!(
+                "端口 {} 已被其他程序或不兼容的 CodexScope-Live 实例占用。请关闭旧窗口后重试，或使用 --port 指定其他端口。",
+                config.port
+            );
+            std::process::exit(1);
         }
         Err(error) => {
             eprintln!("无法监听 {dashboard_url}: {error}");
@@ -48,8 +71,17 @@ fn main() {
         .set_nonblocking(true)
         .expect("failed to configure local listener");
 
+    let access_token = generate_access_token().unwrap_or_else(|error| {
+        eprintln!("无法生成本地安全访问令牌: {error}");
+        std::process::exit(1);
+    });
+
     let state = AppState {
         root: config.root.clone(),
+        data_dir: config.data_dir.clone(),
+        access_token,
+        configuration_signature: instance_signature,
+        generation_status: Arc::new(Mutex::new(GenerationStatus::Pending)),
         clients: Arc::new(Mutex::new(Vec::new())),
     };
     let monitor_state = state.clone();
@@ -82,7 +114,7 @@ fn main() {
     }
 }
 
-fn existing_live_server(port: u16) -> bool {
+fn existing_live_server(port: u16, expected_signature: &str) -> bool {
     let address = SocketAddrV4::new(Ipv4Addr::LOCALHOST, port);
     let Ok(mut stream) = TcpStream::connect_timeout(&address.into(), Duration::from_millis(500))
     else {
@@ -96,7 +128,8 @@ fn existing_live_server(port: u16) -> bool {
         return false;
     }
     let mut response = Vec::new();
-    stream.read_to_end(&mut response).is_ok() && is_codexscope_health_response(&response)
+    stream.read_to_end(&mut response).is_ok()
+        && is_compatible_health_response(&response, expected_signature)
 }
 
 #[cfg(target_os = "windows")]
@@ -119,8 +152,13 @@ fn open_dashboard(url: &str) -> io::Result<()> {
 
 fn monitor_sessions(config: ServerConfig, state: AppState) {
     let mut previous = session_signature(&config.sessions).ok();
-    if let Err(error) = run_generator(&config) {
-        eprintln!("首次生成本地数据失败，继续使用现有或示例数据: {error}");
+    match run_generator(&config) {
+        Ok(()) => set_generation_status(&state, GenerationStatus::Ok),
+        Err(error) => {
+            set_generation_status(&state, GenerationStatus::Error);
+            broadcast(&state.clients, generation_error_event());
+            eprintln!("首次生成本地数据失败，继续使用示例数据: {error}");
+        }
     }
 
     loop {
@@ -131,15 +169,29 @@ fn monitor_sessions(config: ServerConfig, state: AppState) {
         }
         previous = current;
         match run_generator(&config) {
-            Ok(()) => broadcast(&state.clients, data_event(SystemTime::now())),
-            Err(error) => eprintln!("检测到日志变化，但生成数据失败: {error}"),
+            Ok(()) => {
+                set_generation_status(&state, GenerationStatus::Ok);
+                broadcast(&state.clients, data_event(SystemTime::now()));
+            }
+            Err(error) => {
+                set_generation_status(&state, GenerationStatus::Error);
+                broadcast(&state.clients, generation_error_event());
+                eprintln!("检测到日志变化，但生成数据失败: {error}");
+            }
         }
     }
 }
 
+fn set_generation_status(state: &AppState, status: GenerationStatus) {
+    *state
+        .generation_status
+        .lock()
+        .expect("generation status poisoned") = status;
+}
+
 fn run_generator(config: &ServerConfig) -> io::Result<()> {
-    let output = config.root.join("data.js");
-    let cache = config.root.join(".codexscope-cache.json");
+    let output = config.data_dir.join("data.js");
+    let cache = config.data_dir.join(".codexscope-cache.json");
     if let Some(generator) = find_generator(config) {
         let status = Command::new(generator)
             .current_dir(&config.root)
@@ -240,27 +292,48 @@ fn handle_connection(mut stream: TcpStream, state: AppState) {
     }
 
     let target = target.split('?').next().unwrap_or("/");
-    if target == "/events" {
-        serve_events(stream, state.clients);
-        return;
-    }
     if target == "/health" {
+        let body = health_response(&state.configuration_signature);
         write_response(
             &mut stream,
             "200 OK",
             "application/json; charset=utf-8",
-            br#"{"ok":true,"mode":"local"}"#,
+            body.as_bytes(),
         );
+        return;
+    }
+    if target == "/" {
+        write_redirect(&mut stream, &format!("/{}/", state.access_token));
         return;
     }
 
     let target = percent_decode(target).unwrap_or_else(|| "/".to_owned());
-    let relative = target.trim_start_matches('/');
-    let relative = if relative.is_empty() {
-        "index.html"
-    } else {
-        relative
+    let Some(relative) = private_route(&target, &state.access_token) else {
+        write_response(
+            &mut stream,
+            "404 Not Found",
+            "text/plain; charset=utf-8",
+            b"not found",
+        );
+        return;
     };
+    if relative == "events" {
+        serve_events(stream, state.clients);
+        return;
+    }
+    if relative == "status" {
+        let status = *state
+            .generation_status
+            .lock()
+            .expect("generation status poisoned");
+        write_response(
+            &mut stream,
+            "200 OK",
+            "application/json; charset=utf-8",
+            generation_status_json(status).as_bytes(),
+        );
+        return;
+    }
     let Some(relative) = safe_relative_path(relative) else {
         write_response(
             &mut stream,
@@ -270,7 +343,27 @@ fn handle_connection(mut stream: TcpStream, state: AppState) {
         );
         return;
     };
-    let path = state.root.join(relative);
+    let path = if matches!(
+        relative.to_string_lossy().as_ref(),
+        "data.js" | "data.raw.js"
+    ) {
+        let generated = state.data_dir.join(&relative);
+        if generated.is_file() {
+            generated
+        } else {
+            state.root.join(&relative)
+        }
+    } else if is_public_asset(&relative) {
+        state.root.join(&relative)
+    } else {
+        write_response(
+            &mut stream,
+            "404 Not Found",
+            "text/plain; charset=utf-8",
+            b"not found",
+        );
+        return;
+    };
     match fs::read(&path) {
         Ok(body) => write_response(&mut stream, "200 OK", content_type(&path), &body),
         Err(error) if error.kind() == io::ErrorKind::NotFound => write_response(
@@ -289,8 +382,11 @@ fn handle_connection(mut stream: TcpStream, state: AppState) {
 }
 
 fn serve_events(mut stream: TcpStream, clients: Clients) {
-    let headers = b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: *\r\n\r\n";
-    if stream.write_all(headers).is_err() {
+    let headers = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\nCache-Control: no-cache\r\n{}Connection: keep-alive\r\n\r\n",
+        security_headers()
+    );
+    if stream.write_all(headers.as_bytes()).is_err() {
         return;
     }
     let (sender, receiver) = mpsc::channel();
@@ -314,8 +410,20 @@ fn serve_events(mut stream: TcpStream, clients: Clients) {
 
 fn write_response(stream: &mut TcpStream, status: &str, mime: &str, body: &[u8]) {
     let header = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status}\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nCache-Control: no-store\r\n{}Connection: close\r\n\r\n",
+        body.len(),
+        security_headers()
+    );
+    let _ = stream.write_all(header.as_bytes());
+    let _ = stream.write_all(body);
+}
+
+fn write_redirect(stream: &mut TcpStream, location: &str) {
+    let body = b"CodexScope-Live";
+    let header = format!(
+        "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\n{}Connection: close\r\n\r\n",
         body.len()
+        , security_headers()
     );
     let _ = stream.write_all(header.as_bytes());
     let _ = stream.write_all(body);

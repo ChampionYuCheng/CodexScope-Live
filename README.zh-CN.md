@@ -1,4 +1,4 @@
-# CodexScope Live
+# CodexScope-Live
 
 [English](README.md) | 简体中文
 
@@ -7,7 +7,7 @@
 
 CodexScope Live 是一个本地优先的 Codex 用量面板，用于查看本机 Codex 会话日志中的 Token 消耗、额度状态、模型分布、会话活跃度、调用分布、缓存命中率和费用估算。
 
-!![img.png](img.png)(assets/codexscope-dashboard-24h.png)
+![CodexScope-Live 用量面板](assets/codexscope-dashboard-24h.png)
 
 ## 原项目署名与许可证
 
@@ -53,15 +53,24 @@ CodexScope Live 读取本机 Codex JSONL 会话日志中已经存在的用量元
 
 ### Windows 免安装实时面板（推荐）
 
-普通用户请从 [GitHub Releases](https://github.com/ChampionYuCheng/CodexScope-Live/releases) 下载 `CodexScope-Live-Windows-x64.zip`，不要下载 GitHub 自动生成的 `Source code` 压缩包。
+普通用户请从 [GitHub Releases](https://github.com/ChampionYuCheng/CodexScope-Live/releases) 下载 `CodexScope-Live-v0.2.0-Windows-x64.zip` 及其同名 `.sha256` 文件，不要下载 GitHub 自动生成的 `Source code` 压缩包。
 
 1. 解压整个 ZIP。
 2. 双击 `CodexScope-Live.exe`。
 3. 程序自动打开 `http://127.0.0.1:48173/`。
 
-便携包已经包含 Rust 实时服务和 Go 数据生成器，不需要安装 Node.js、Go、Rust，也不需要配置环境变量。程序自动读取当前 Windows 用户的 `%USERPROFILE%/.codex/sessions`；如果还没有本地 Codex 会话，则先显示示例数据。
+便携包已经包含 Rust 实时服务和 Go 数据生成器，不需要安装 Node.js、Go、Rust，也不需要配置环境变量。程序自动读取当前 Windows 用户的 `%USERPROFILE%/.codex/sessions`；如果还没有本地 Codex 会话，则先显示示例数据。真实面板数据和缓存保存在 `%LOCALAPPDATA%/CodexScope-Live`，不会写进解压后的程序目录。
 
-Windows SmartScreen 可能因为程序暂未进行商业代码签名而显示“未知发布者”。请确认下载地址是本仓库的 Release，并可使用同名 `.sha256` 文件核对压缩包后再选择运行。
+浏览器收藏夹继续保存 `http://127.0.0.1:48173/` 即可。每次启动时，程序会把它重定向到本次运行随机生成的私有路径。程序运行期间不要分享重定向后的完整地址，因为该地址可以访问当前本地面板。
+
+Windows SmartScreen 可能因为程序暂未进行代码签名而显示“未知发布者”。请确认下载地址是本仓库的 Release，并在运行前核对 SHA256：
+
+~~~powershell
+Get-FileHash .\CodexScope-Live-v0.2.0-Windows-x64.zip -Algorithm SHA256
+Get-Content .\CodexScope-Live-v0.2.0-Windows-x64.zip.sha256
+~~~
+
+两处哈希值必须完全一致。
 
 ### 预览面板
 
@@ -109,6 +118,7 @@ cargo run --manifest-path ./live-server/Cargo.toml -- --root . --port 48173
 ~~~text
 --root <path>          面板根目录，默认是当前目录
 --sessions <path>      Codex 会话目录，默认使用当前平台的用户目录
+--data-dir <path>      私有运行数据目录，默认使用当前平台的用户数据目录
 --generator <path>     指定预编译数据生成器路径
 --port <number>        本地 HTTP 端口，默认是 48173
 --interval-ms <number> 轮询间隔，默认是 1000 ms
@@ -172,13 +182,13 @@ npm.cmd run release:windows
 npm.cmd run check:release:windows
 ~~~
 
-产物位于 `dist/CodexScope-Live-Windows-x64.zip`，同时生成同名 `.sha256` 校验文件。压缩包包含 Rust 实时服务、Go 数据生成器、完整前端资源、MIT 许可证和双语 README；普通用户不需要开发环境。原有 `npm run release:local` 继续保留给旧的跨平台静态包流程。
+产物位于 `dist/CodexScope-Live-v0.2.0-Windows-x64.zip`，同时生成同名 `.sha256` 校验文件。验证脚本会先把最终 ZIP 解压到临时目录，再检查两个 EXE 都是 Windows x64、校验 SHA256、让包内生成器解析一份真实 JSONL 测试数据、确认私有运行数据没有写入程序目录，并验证跨域网页无法加载 `data.js`。原有 `npm run release:local` 继续保留给旧的跨平台静态包流程。
 
 ## 数据流
 
 1. Codex 把本机会话日志写入对应平台的会话目录。
 2. `generate_codex_data.go` 提取 Token 数量、模型名、会话 ID、耗时、失败状态和 rate-limit 元数据等用量信息。
-3. 生成器把预计算视图写入 `data.js`，把压缩后的原始数据写入 `data.raw.js`。
+3. 实时服务把预计算视图和原始数据写入平台用户数据目录；Windows 默认为 `%LOCALAPPDATA%/CodexScope-Live`。手动运行生成器时则使用命令行指定的输出路径。
 4. 浏览器先加载示例数据；如果存在本地导出文件，再用真实数据覆盖示例数据。
 5. 实时模式下，Rust 服务检测 JSONL 文件变化，重新生成导出文件，并通过 SSE 通知浏览器。
 6. 图表、筛选、排行、额度状态和费用估算都在浏览器中计算。
@@ -206,9 +216,11 @@ npm.cmd run check:release:windows
 - `windows/open-dashboard.cmd`：Windows 实时服务启动脚本
 - `scripts/build-release.sh`：旧的跨平台静态 Release 包构建脚本
 - `scripts/build-windows-release.ps1`：Windows x64 免安装实时包构建脚本
-- `verify_portable_release.js`：从最终发布目录启动 EXE 并验证健康检查与关键资源
+- `release-manifest.json`：Windows 构建脚本和验证脚本共用的运行文件清单
+- `verify_portable_release.js`：解压并验证最终 ZIP，包括校验值、x64 架构、真实数据生成、数据隔离和跨域保护
 - `verify_responsive.js`：基于 Playwright 的布局和交互检查
 - `verify_live_data.js`：检查首次生成期间从示例数据自动恢复为真实数据的 Playwright 回归脚本
+- `verify_source_launcher.js`：检查源码模式优先构建当前 Rust 代码、不会直接运行过期缓存 EXE 的回归脚本
 - `verify_tabs.js`：检查语义化 Tab、URL 状态、刷新恢复和键盘导航的 Playwright 回归脚本
 - `verify_theme.js`：检查品牌标识、主题持久化、键盘操作和移动端布局的 Playwright 回归脚本
 - `assets/`：截图和静态资源
@@ -220,6 +232,7 @@ npm.cmd run check:release:windows
 - 只有本地会话日志包含相关 `rate_limits` 元数据时，页面才能显示额度和风险信息。
 - 费用数据是估算值，不能当作账单记录。
 - 服务只监听回环地址 `127.0.0.1`，设计目标是本机使用。
+- Windows 可执行文件暂未进行代码签名，因此 SmartScreen 可能提示未知发布者。
 
 ## 许可证
 

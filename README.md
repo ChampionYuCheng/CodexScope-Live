@@ -1,4 +1,4 @@
-# CodexScope Live
+# CodexScope-Live
 
 English | [简体中文](README.zh-CN.md)
 
@@ -7,7 +7,7 @@ English | [简体中文](README.zh-CN.md)
 
 CodexScope Live is a local-first dashboard for understanding Codex usage from local session logs. It turns token usage, quota status, model mix, session activity, request distribution, cache hits, and estimated cost into a desktop-friendly view.
 
-!![img_1.png](img_1.png)(assets/codexscope-dashboard-24h.png)
+![CodexScope-Live dashboard](assets/codexscope-dashboard-24h.png)
 
 ## Attribution
 
@@ -53,15 +53,24 @@ The project has two modes:
 
 ### Windows portable live dashboard (recommended)
 
-Regular users should download `CodexScope-Live-Windows-x64.zip` from [GitHub Releases](https://github.com/ChampionYuCheng/CodexScope-Live/releases). Do not use GitHub's automatically generated `Source code` archives.
+Regular users should download `CodexScope-Live-v0.2.0-Windows-x64.zip` and its matching `.sha256` file from [GitHub Releases](https://github.com/ChampionYuCheng/CodexScope-Live/releases). Do not use GitHub's automatically generated `Source code` archives.
 
 1. Extract the entire ZIP.
 2. Double-click `CodexScope-Live.exe`.
 3. The app opens `http://127.0.0.1:48173/` automatically.
 
-The portable package includes the Rust live server and the precompiled Go data generator. It does not require Node.js, Go, Rust, or manually configured environment variables. It automatically reads `%USERPROFILE%/.codex/sessions`; if no local Codex session exists yet, the dashboard initially shows sample data.
+The portable package includes the Rust live server and the precompiled Go data generator. It does not require Node.js, Go, Rust, or manually configured environment variables. It automatically reads `%USERPROFILE%/.codex/sessions`; if no local Codex session exists yet, the dashboard initially shows sample data. Generated dashboard data and caches are stored under `%LOCALAPPDATA%/CodexScope-Live`, not in the extracted application directory.
 
-Windows SmartScreen may report an unknown publisher because the executable is not commercially code-signed. Confirm that the download came from this repository's Release page and optionally verify it against the matching `.sha256` file before running it.
+The bookmark-friendly address remains `http://127.0.0.1:48173/`. Each launch redirects it to a random private path. Do not share the redirected address while the app is running because it grants access to the current local dashboard.
+
+Windows SmartScreen may report an unknown publisher because the executable is not commercially code-signed. Confirm that the download came from this repository's Release page and verify it against the matching `.sha256` file before running it:
+
+~~~powershell
+Get-FileHash .\CodexScope-Live-v0.2.0-Windows-x64.zip -Algorithm SHA256
+Get-Content .\CodexScope-Live-v0.2.0-Windows-x64.zip.sha256
+~~~
+
+The two hashes must match exactly.
 
 ### Preview the dashboard
 
@@ -109,6 +118,7 @@ Useful options:
 ~~~text
 --root <path>          Dashboard root directory; defaults to the current directory
 --sessions <path>      Codex session directory; defaults to the platform home directory
+--data-dir <path>      Private generated-data directory; defaults to the platform user-data directory
 --generator <path>     Explicit path to a prebuilt data generator
 --port <number>        Local HTTP port; defaults to 48173
 --interval-ms <number> Polling interval; defaults to 1000 ms
@@ -172,13 +182,13 @@ npm.cmd run release:windows
 npm.cmd run check:release:windows
 ~~~
 
-The artifacts are written to `dist/CodexScope-Live-Windows-x64.zip` and a matching `.sha256` file. The ZIP contains the Rust live server, Go data generator, complete frontend assets, MIT license, and both README files, so end users do not need a development toolchain. The existing `npm run release:local` command remains available for the legacy cross-platform static-package flow.
+The artifacts are written to `dist/CodexScope-Live-v0.2.0-Windows-x64.zip` and a matching `.sha256` file. The verifier extracts that final ZIP into a temporary directory, checks both executables are Windows x64, validates the checksum, runs a real JSONL fixture through the bundled generator, confirms private runtime data stays outside the app directory, and checks that a cross-origin page cannot load `data.js`. The existing `npm run release:local` command remains available for the legacy cross-platform static-package flow.
 
 ## Data flow
 
 1. Codex writes local JSONL session logs under the platform-specific session directory.
 2. `generate_codex_data.go` extracts usage metadata such as token counts, model names, session IDs, timing, failures, and rate-limit metadata.
-3. The generator writes precomputed views to `data.js` and compact raw data to `data.raw.js`.
+3. The live server writes precomputed views to the platform user-data directory (`%LOCALAPPDATA%/CodexScope-Live` on Windows); manual generator runs use the paths supplied on the command line.
 4. The browser loads sample data first, then overrides it with local exports when those files exist.
 5. In live mode, the Rust server detects changed JSONL files, regenerates the export, and notifies the browser through SSE.
 6. Charts, filters, rankings, quota status, and cost estimates are calculated in the browser.
@@ -206,9 +216,11 @@ When available, the dashboard retrieves the USD/CNY rate from the Frankfurter AP
 - `windows/open-dashboard.cmd`: Windows live-server launcher
 - `scripts/build-release.sh`: legacy cross-platform static-package builder
 - `scripts/build-windows-release.ps1`: Windows x64 portable live-package builder
-- `verify_portable_release.js`: launches the final packaged executable and verifies its health endpoint and required assets
+- `release-manifest.json`: shared runtime-file contract used by the Windows builder and verifier
+- `verify_portable_release.js`: extracts and verifies the final ZIP, including checksum, x64 binaries, real data generation, data isolation, and cross-origin protection
 - `verify_responsive.js`: Playwright layout and interaction audit
 - `verify_live_data.js`: Playwright regression check for recovery from startup sample data to the real generated payload
+- `verify_source_launcher.js`: regression check that source mode rebuilds current Rust code before using a cached executable
 - `verify_tabs.js`: Playwright regression check for semantic tabs, URL state, refresh, and keyboard navigation
 - `verify_theme.js`: Playwright regression check for branding, theme persistence, keyboard access, and mobile layout
 - `assets/`: screenshots and static assets
@@ -220,6 +232,7 @@ When available, the dashboard retrieves the USD/CNY rate from the Frankfurter AP
 - Quota and risk information is only available when the local session logs contain the relevant `rate_limits` metadata.
 - Cost values are estimates and should not be treated as billing records.
 - The server binds to loopback (`127.0.0.1`) and is intended for local use only.
+- The Windows executables are not code-signed, so SmartScreen can show an unknown-publisher warning.
 
 ## License
 

@@ -17,7 +17,8 @@ const contentTypes = {
   ".js": "text/javascript; charset=utf-8",
 };
 
-async function startRaceServer() {
+async function startRaceServer({ generationError = false, statusMissing = false } = {}) {
+  const privatePrefix = "/test-access-token";
   let dataReady = false;
   let dataRequests = 0;
   let pageLoads = 0;
@@ -25,7 +26,7 @@ async function startRaceServer() {
 
   const server = http.createServer((request, response) => {
     const pathname = new URL(request.url, "http://127.0.0.1").pathname;
-    if (pathname === "/events") {
+    if (pathname === `${privatePrefix}/events`) {
       response.writeHead(200, {
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
@@ -37,7 +38,21 @@ async function startRaceServer() {
       return;
     }
 
-    if (pathname === "/data.js") {
+    if (pathname === `${privatePrefix}/status`) {
+      if (statusMissing) {
+        response.writeHead(404, { "Cache-Control": "no-store" });
+        response.end("not found");
+        return;
+      }
+      response.writeHead(200, {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json; charset=utf-8",
+      });
+      response.end(JSON.stringify({ state: generationError ? "error" : (dataReady ? "ok" : "pending") }));
+      return;
+    }
+
+    if (pathname === `${privatePrefix}/data.js`) {
       dataRequests += 1;
       if (dataRequests === 1) {
         setTimeout(() => { dataReady = true; }, 700);
@@ -55,9 +70,15 @@ async function startRaceServer() {
       return;
     }
 
-    const relative = pathname === "/" ? "index.html" : pathname.slice(1);
+    const relative = pathname === `${privatePrefix}/`
+      ? "index.html"
+      : pathname.slice(`${privatePrefix}/`.length);
     const filePath = path.join(root, relative);
-    if (!filePath.startsWith(root) || !fs.existsSync(filePath)) {
+    if (
+      !filePath.startsWith(root)
+      || !fs.existsSync(filePath)
+      || !fs.statSync(filePath).isFile()
+    ) {
       response.writeHead(404);
       response.end("not found");
       return;
@@ -73,7 +94,7 @@ async function startRaceServer() {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   return {
-    url: `http://127.0.0.1:${address.port}/`,
+    url: `http://127.0.0.1:${address.port}${privatePrefix}/`,
     stats: () => ({ dataRequests, pageLoads }),
     close: async () => {
       eventStreams.forEach((stream) => stream.destroy());
@@ -86,12 +107,14 @@ async function startRaceServer() {
   const raceServer = await startRaceServer();
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
+  let errorServer;
+  let oldServer;
   await page.addInitScript(() => localStorage.setItem("codexscope-live-enabled", "false"));
 
   try {
     await page.goto(raceServer.url, { waitUntil: "domcontentloaded" });
     assert.equal(await page.locator("#sourcePrimary").textContent(), "示例数据", "应先稳定复现启动阶段的示例数据回退");
-    await page.waitForFunction(() => document.querySelector("#liveStatusText")?.textContent === "实时监控已暂停");
+    await page.waitForFunction(() => document.querySelector("#liveStatusText")?.textContent === "正在生成本地数据…");
 
     await page.waitForFunction(() => document.querySelector("#sourcePrimary")?.textContent === "Codex 桌面端", null, {
       timeout: 6000,
@@ -100,10 +123,30 @@ async function startRaceServer() {
     assert.equal(await page.locator("#syncText").textContent(), "00:00 已同步");
     assert.ok(raceServer.stats().dataRequests >= 2, "页面应重新探测已经就绪的 data.js");
     assert.ok(raceServer.stats().pageLoads >= 2, "真实数据就绪后应自动刷新页面");
+
+    errorServer = await startRaceServer({ generationError: true });
+    const errorPage = await browser.newPage();
+    await errorPage.goto(errorServer.url, { waitUntil: "domcontentloaded" });
+    await errorPage.waitForFunction(
+      () => document.querySelector("#liveStatusText")?.textContent === "数据生成失败，请查看程序窗口",
+    );
+    await errorPage.close();
+
+    oldServer = await startRaceServer({ statusMissing: true });
+    const oldServerPage = await browser.newPage();
+    await oldServerPage.goto(oldServer.url, { waitUntil: "domcontentloaded" });
+    await oldServerPage.waitForFunction(
+      () => document.querySelector("#liveStatusText")?.textContent === "服务版本过旧，请重新启动",
+      null,
+      { timeout: 3000 },
+    );
+    await oldServerPage.close();
     console.log("Live data verification passed: startup fallback recovers from sample to real data.");
   } finally {
     await browser.close();
     await raceServer.close();
+    if (errorServer) await errorServer.close();
+    if (oldServer) await oldServer.close();
   }
 })().catch((error) => {
   console.error(error.stack || error);

@@ -4,10 +4,13 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub const SERVER_PROTOCOL_VERSION: u8 = 2;
+
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
     pub root: PathBuf,
     pub sessions: PathBuf,
+    pub data_dir: PathBuf,
     pub generator: Option<PathBuf>,
     pub port: u16,
     pub interval_ms: u64,
@@ -24,6 +27,7 @@ impl ServerConfig {
         let executable = env::current_exe().ok();
         let mut root = default_dashboard_root(&working_dir, executable.as_deref());
         let mut sessions = default_sessions_path();
+        let mut data_dir = default_data_dir();
         let mut generator = None;
         let mut port = 48173;
         let mut interval_ms = 1000;
@@ -41,6 +45,11 @@ impl ServerConfig {
                 "--sessions" => {
                     if let Some(value) = value() {
                         sessions = PathBuf::from(value);
+                    }
+                }
+                "--data-dir" => {
+                    if let Some(value) = value() {
+                        data_dir = PathBuf::from(value);
                     }
                 }
                 "--generator" => {
@@ -70,6 +79,7 @@ impl ServerConfig {
         Self {
             root,
             sessions,
+            data_dir,
             generator,
             port,
             interval_ms,
@@ -90,10 +100,76 @@ pub fn dashboard_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}/")
 }
 
-pub fn is_codexscope_health_response(response: &[u8]) -> bool {
+pub fn health_response(configuration_signature: &str) -> String {
+    format!(
+        "{{\"ok\":true,\"mode\":\"local\",\"protocol\":{SERVER_PROTOCOL_VERSION},\"config\":\"{configuration_signature}\"}}"
+    )
+}
+
+pub fn is_compatible_health_response(response: &[u8], expected_signature: &str) -> bool {
+    let expected = health_response(expected_signature);
     response
-        .windows(br#"{"ok":true,"mode":"local"}"#.len())
-        .any(|window| window == br#"{"ok":true,"mode":"local"}"#)
+        .windows(expected.len())
+        .any(|window| window == expected.as_bytes())
+}
+
+pub fn configuration_signature(root: &Path, sessions: &Path, data_dir: &Path) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for value in [root, sessions, data_dir] {
+        for byte in value.to_string_lossy().replace('\\', "/").bytes() {
+            hash ^= u64::from(byte.to_ascii_lowercase());
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        hash ^= 0xff;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
+pub fn private_route<'a>(target: &'a str, access_token: &str) -> Option<&'a str> {
+    let target = target.strip_prefix('/')?;
+    let remainder = target.strip_prefix(access_token)?;
+    if remainder.is_empty() || remainder == "/" {
+        return Some("index.html");
+    }
+    remainder.strip_prefix('/')
+}
+
+pub fn is_public_asset(relative: &Path) -> bool {
+    let normalized = relative.to_string_lossy().replace('\\', "/");
+    matches!(
+        normalized.as_str(),
+        "index.html" | "styles.css" | "app.js" | "live.js" | "theme.js" | "data.sample.js"
+    ) || normalized.starts_with("assets/")
+}
+
+pub fn security_headers() -> &'static str {
+    "Cross-Origin-Resource-Policy: same-origin\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://api.frankfurter.dev; object-src 'none'; base-uri 'none'; frame-ancestors 'none'\r\nReferrer-Policy: no-referrer\r\nX-Frame-Options: DENY\r\n"
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GenerationStatus {
+    Pending,
+    Ok,
+    Error,
+}
+
+pub fn generation_status_json(status: GenerationStatus) -> &'static str {
+    match status {
+        GenerationStatus::Pending => "{\"state\":\"pending\"}",
+        GenerationStatus::Ok => "{\"state\":\"ok\"}",
+        GenerationStatus::Error => "{\"state\":\"error\"}",
+    }
+}
+
+pub fn generation_error_event() -> String {
+    "event: generation-error\ndata: {}\n\n".to_owned()
+}
+
+pub fn generate_access_token() -> io::Result<String> {
+    let mut bytes = [0u8; 24];
+    fill_secure_random(&mut bytes)?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 fn default_sessions_path() -> PathBuf {
@@ -104,6 +180,68 @@ fn default_sessions_path() -> PathBuf {
         return PathBuf::from(home).join(".codex").join("sessions");
     }
     PathBuf::from(".codex").join("sessions")
+}
+
+fn default_data_dir() -> PathBuf {
+    if let Some(local_app_data) = env::var_os("LOCALAPPDATA") {
+        return PathBuf::from(local_app_data).join("CodexScope-Live");
+    }
+    if let Some(xdg_data_home) = env::var_os("XDG_DATA_HOME") {
+        return PathBuf::from(xdg_data_home).join("CodexScope-Live");
+    }
+    if let Some(home) = env::var_os("HOME") {
+        return PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join("CodexScope-Live");
+    }
+    env::temp_dir().join("CodexScope-Live")
+}
+
+#[cfg(windows)]
+fn fill_secure_random(bytes: &mut [u8]) -> io::Result<()> {
+    use std::ffi::c_void;
+
+    #[link(name = "bcrypt")]
+    extern "system" {
+        fn BCryptGenRandom(
+            algorithm: *mut c_void,
+            buffer: *mut u8,
+            buffer_length: u32,
+            flags: u32,
+        ) -> i32;
+    }
+
+    const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x00000002;
+    let status = unsafe {
+        BCryptGenRandom(
+            std::ptr::null_mut(),
+            bytes.as_mut_ptr(),
+            bytes.len() as u32,
+            BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+        )
+    };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("Windows secure random generation failed with status {status}"),
+        ))
+    }
+}
+
+#[cfg(unix)]
+fn fill_secure_random(bytes: &mut [u8]) -> io::Result<()> {
+    std::io::Read::read_exact(&mut fs::File::open("/dev/urandom")?, bytes)
+}
+
+#[cfg(not(any(windows, unix)))]
+fn fill_secure_random(_bytes: &mut [u8]) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "secure random generation is unsupported on this platform",
+    ))
 }
 
 pub fn safe_relative_path(value: &str) -> Option<PathBuf> {
@@ -203,12 +341,15 @@ mod tests {
             "codexscope-live",
             "--root",
             "D:/CodexScope",
+            "--data-dir",
+            "D:/CodexScope-Data",
             "--port",
             "4321",
             "--interval-ms",
             "750",
         ]);
         assert_eq!(config.root, PathBuf::from("D:/CodexScope"));
+        assert_eq!(config.data_dir, PathBuf::from("D:/CodexScope-Data"));
         assert_eq!(config.port, 4321);
         assert_eq!(config.interval_ms, 750);
         assert!(config.open_browser);
@@ -257,13 +398,84 @@ mod tests {
     }
 
     #[test]
-    fn recognizes_only_codexscope_health_response() {
-        assert!(is_codexscope_health_response(
-            b"HTTP/1.1 200 OK\r\n\r\n{\"ok\":true,\"mode\":\"local\"}"
+    fn reuses_only_a_compatible_server_instance() {
+        let body = health_response("abc123");
+        let response = format!("HTTP/1.1 200 OK\r\n\r\n{body}");
+
+        assert!(is_compatible_health_response(response.as_bytes(), "abc123"));
+        assert!(!is_compatible_health_response(
+            response.as_bytes(),
+            "different"
         ));
-        assert!(!is_codexscope_health_response(
-            b"HTTP/1.1 200 OK\r\n\r\nother service"
+        assert!(!is_compatible_health_response(
+            b"HTTP/1.1 200 OK\r\n\r\n{\"ok\":true,\"mode\":\"local\"}",
+            "abc123"
         ));
+    }
+
+    #[test]
+    fn configuration_signature_changes_with_private_data_sources() {
+        let first = configuration_signature(
+            Path::new("D:/app"),
+            Path::new("D:/sessions-a"),
+            Path::new("D:/data"),
+        );
+        let second = configuration_signature(
+            Path::new("D:/app"),
+            Path::new("D:/sessions-b"),
+            Path::new("D:/data"),
+        );
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn private_routes_require_the_exact_access_token() {
+        assert_eq!(
+            private_route("/secret-token/data.js", "secret-token"),
+            Some("data.js")
+        );
+        assert_eq!(
+            private_route("/secret-token/assets/logo.svg", "secret-token"),
+            Some("assets/logo.svg")
+        );
+        assert_eq!(private_route("/data.js", "secret-token"), None);
+        assert_eq!(private_route("/wrong/data.js", "secret-token"), None);
+    }
+
+    #[test]
+    fn static_file_allowlist_excludes_source_and_private_files() {
+        assert!(is_public_asset(Path::new("index.html")));
+        assert!(is_public_asset(Path::new("assets/logo.svg")));
+        assert!(!is_public_asset(Path::new("generate_codex_data.go")));
+        assert!(!is_public_asset(Path::new("README.md")));
+        assert!(!is_public_asset(Path::new(".codexscope-cache.json")));
+    }
+
+    #[test]
+    fn browser_responses_include_cross_origin_protection() {
+        let headers = security_headers();
+        assert!(headers.contains("Cross-Origin-Resource-Policy: same-origin"));
+        assert!(headers.contains("X-Content-Type-Options: nosniff"));
+        assert!(headers.contains("Content-Security-Policy:"));
+        assert!(headers.contains("Referrer-Policy: no-referrer"));
+        assert!(!headers.contains("Access-Control-Allow-Origin"));
+    }
+
+    #[test]
+    fn generated_access_tokens_are_random_hex_values() {
+        let first = generate_access_token().unwrap();
+        let second = generate_access_token().unwrap();
+        assert_eq!(first.len(), 48);
+        assert!(first.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn generation_status_and_error_event_do_not_expose_paths() {
+        let status = generation_status_json(GenerationStatus::Error);
+        assert_eq!(status, "{\"state\":\"error\"}");
+        let event = generation_error_event();
+        assert_eq!(event, "event: generation-error\ndata: {}\n\n");
     }
 
     #[test]

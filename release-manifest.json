@@ -1,0 +1,30 @@
+{
+  "runtimeFiles": [
+    "index.html",
+    "styles.css",
+    "app.js",
+    "live.js",
+    "theme.js",
+    "data.sample.js",
+    "LICENSE",
+    "README.md",
+    "README.zh-CN.md"
+  ],
+  "runtimeDirectories": [
+    "assets"
+  ],
+  "generatedPackageFiles": [
+    "CodexScope-Live.exe",
+    "codexscope-generator.exe",
+    "data.js",
+    "data.raw.js",
+    "START-HERE.txt"
+  ],
+  "forbiddenPaths": [
+    "node_modules",
+    "live-server",
+    "generate_codex_data.go",
+    ".codexscope-cache.json",
+    ".codexscope-cache.json.stamp"
+  ]
+}
