@@ -1,5 +1,5 @@
 (() => {
-    const data = window.CODEXSCOPE_DATA || window.QUOTASCOPE_DATA || window.CODEXSCOPE_SAMPLE_DATA;
+    let data = window.CODEXSCOPE_DATA || window.QUOTASCOPE_DATA || window.CODEXSCOPE_SAMPLE_DATA;
     if (!data)
         return;
     const uiState = {
@@ -57,7 +57,7 @@
             return rows;
         return [...rows].sort((a, b) => recordTime(a) - recordTime(b));
     };
-    const rawDataPath = data.rawDataPath || "data.raw.js";
+    let rawDataPath = data.rawDataPath || "data.raw.js";
     const getRawData = () => window.CODEXSCOPE_RAW_DATA || data;
     const getCatalog = (source = getRawData()) => source.catalog || data.catalog || {};
     const getSessionCatalogRows = (source = getRawData()) => {
@@ -148,7 +148,8 @@
         if (!rawDataPromise) {
             rawDataPromise = new Promise((resolve, reject) => {
                 const script = document.createElement("script");
-                script.src = rawDataPath;
+                const separator = rawDataPath.includes("?") ? "&" : "?";
+                script.src = `${rawDataPath}${separator}codexscope-data=${encodeURIComponent(data.generatedAt || Date.now())}`;
                 script.async = true;
                 script.onload = () => {
                     if (!window.CODEXSCOPE_RAW_DATA) {
@@ -173,8 +174,8 @@
     const getRecords = () => recordsCache || (recordsCache = decodeRecords());
     const getTtfbRecords = () => ttfbRecordsCache || (ttfbRecordsCache = decodeTtfbRecords());
     const getFailureRecords = () => failureRecordsCache || (failureRecordsCache = decodeFailureRecords());
-    const precomputedViews = data.views || {};
-    const limits = data.limits || {};
+    let precomputedViews = data.views || {};
+    let limits = data.limits || {};
     let summary = data.summary || {};
     let trendRows = data.trend || [];
     let distributionRows = [];
@@ -190,9 +191,9 @@
         status: "fallback",
     };
     const EXCHANGE_RATE_URL = "https://api.frankfurter.dev/v2/rate/USD/CNY?providers=ECB";
-    const latestDataTime = Number((data.availableRange || {}).end) || Date.now();
-    const earliestDataTime = Number((data.availableRange || {}).start) || latestDataTime;
-    const firstDataTime = Number.isFinite(earliestDataTime) ? earliestDataTime : latestDataTime;
+    let latestDataTime = Number((data.availableRange || {}).end) || Date.now();
+    let earliestDataTime = Number((data.availableRange || {}).start) || latestDataTime;
+    let firstDataTime = Number.isFinite(earliestDataTime) ? earliestDataTime : latestDataTime;
     const rangeNow = () => Math.min(Date.now(), latestDataTime);
     const lowerBound = (rows, ts) => {
         let lo = 0;
@@ -374,9 +375,9 @@
             output: Number(rule?.output) || 0,
         })).filter((rule) => rule.patterns.length && (rule.input || rule.cached || rule.output))
         : [];
-    const pricingRules = normalizePricingRules(data.pricingRules || window.CODEXSCOPE_SAMPLE_DATA?.pricingRules);
+    let pricingRules = normalizePricingRules(data.pricingRules || window.CODEXSCOPE_SAMPLE_DATA?.pricingRules);
     const pricingCache = new Map();
-    const recordCostCache = new WeakMap();
+    let recordCostCache = new WeakMap();
     const pricingForModel = (model) => {
         const key = String(model || "").toLowerCase();
         if (!pricingCache.has(key)) {
@@ -715,6 +716,7 @@
         return ensureRawData().then(() => computeStats(range));
     };
     let rangeRequestSeq = 0;
+    let activeRangePreset = "today";
     const applyStats = (stats) => {
         summary = stats.summary;
         summary.rangeLabel = stats.label;
@@ -737,7 +739,7 @@
         setText("peakRate", (summary.peakTpmLabel || "--").replace(/\s*TPM$/, ""));
         setText("chartMeta", `累计 ${summary.totalTokensLabel || "--"}`);
     };
-    const isSampleData = data.sample === true;
+    let isSampleData = data.sample === true;
     const quotaSourceLabel = (withPrefix = true) => {
         const limitId = String(limits.limitId || "").toLowerCase();
         const limitName = String(limits.limitName || "");
@@ -757,30 +759,6 @@
         }
         return withPrefix ? `来源：${label}` : label;
     };
-    setText("sourcePrimary", isSampleData ? "示例数据" : "Codex 桌面端");
-    setText("sourceSecondary", isSampleData ? "直接预览" : "本地日志");
-    setText("sourceTertiary", isSampleData ? "运行脚本看真实数据" : quotaSourceLabel(false));
-    setText("quotaSource", quotaSourceLabel(true));
-    setText("syncText", isSampleData ? "Demo 预览" : `${data.generatedAt?.slice(11, 16) || "--"} 已同步`);
-    const primaryRemain = limits.primaryRemaining ?? null;
-    const secondaryRemain = limits.secondaryRemaining ?? null;
-    const hasLimitData = primaryRemain !== null || secondaryRemain !== null;
-    setText("shieldState", limits.rateLimitReachedType ? "已触发限流" : hasLimitData ? "当前安全" : "等待数据");
-    if (primaryRemain !== null) {
-        setText("primaryRemain", pct(primaryRemain));
-        const primaryFill = $("primaryFill");
-        if (primaryFill)
-            primaryFill.style.width = pct(primaryRemain);
-        setText("primaryNote", `已用 ${pct(limits.primaryUsed)} · reset ${limits.primaryReset || "--"}`);
-    }
-    if (secondaryRemain !== null) {
-        setText("secondaryRemain", pct(secondaryRemain));
-        const secondaryFill = $("secondaryFill");
-        if (secondaryFill)
-            secondaryFill.style.width = pct(secondaryRemain);
-        setText("secondaryNote", `已用 ${pct(limits.secondaryUsed)} · reset ${limits.secondaryReset || "--"}`);
-    }
-    setText("planType", (limits.planType || "Pro").toUpperCase());
     const setRing = (selector, remain, radius) => {
         const el = document.querySelector(selector);
         if (!el || remain === null || remain === undefined)
@@ -788,8 +766,32 @@
         const circumference = Math.PI * 2 * radius;
         el.style.strokeDasharray = `${circumference * Math.max(0, Math.min(100, remain)) / 100} ${circumference}`;
     };
-    setRing(".ring-main", primaryRemain, 76);
-    setRing(".ring-teal", secondaryRemain, 58);
+    const renderDataMetadata = () => {
+        isSampleData = data.sample === true;
+        setText("sourcePrimary", isSampleData ? "示例数据" : "Codex 桌面端");
+        setText("sourceSecondary", isSampleData ? "直接预览" : "本地日志");
+        setText("sourceTertiary", isSampleData ? "运行脚本看真实数据" : quotaSourceLabel(false));
+        setText("quotaSource", quotaSourceLabel(true));
+        setText("syncText", isSampleData ? "Demo 预览" : `${data.generatedAt?.slice(11, 16) || "--"} 已同步`);
+        const primaryRemain = limits.primaryRemaining ?? null;
+        const secondaryRemain = limits.secondaryRemaining ?? null;
+        const hasLimitData = primaryRemain !== null || secondaryRemain !== null;
+        setText("shieldState", limits.rateLimitReachedType ? "已触发限流" : hasLimitData ? "当前安全" : "等待数据");
+        setText("primaryRemain", primaryRemain === null ? "等待数据" : pct(primaryRemain));
+        setText("secondaryRemain", secondaryRemain === null ? "等待数据" : pct(secondaryRemain));
+        setText("primaryNote", primaryRemain === null ? "本地日志暂无 rate_limits" : `已用 ${pct(limits.primaryUsed)} · reset ${limits.primaryReset || "--"}`);
+        setText("secondaryNote", secondaryRemain === null ? "本地日志暂无 rate_limits" : `已用 ${pct(limits.secondaryUsed)} · reset ${limits.secondaryReset || "--"}`);
+        const primaryFill = $("primaryFill");
+        if (primaryFill)
+            primaryFill.style.width = primaryRemain === null ? "0%" : pct(primaryRemain);
+        const secondaryFill = $("secondaryFill");
+        if (secondaryFill)
+            secondaryFill.style.width = secondaryRemain === null ? "0%" : pct(secondaryRemain);
+        setText("planType", (limits.planType || "Pro").toUpperCase());
+        setRing(".ring-main", primaryRemain ?? 0, 76);
+        setRing(".ring-teal", secondaryRemain ?? 0, 58);
+    };
+    renderDataMetadata();
     const niceMax = (value) => {
         if (!value)
             return 1000;
@@ -1281,51 +1283,63 @@
             renderCost();
         }
     };
-    const applyRange = (preset) => {
+    const applyRange = (preset, options = {}) => {
+        activeRangePreset = preset;
         const custom = preset === "custom";
         $("customRange").hidden = !custom;
         document.querySelectorAll(".period-btn").forEach((button) => {
             button.classList.toggle("active", button.dataset.range === preset);
         });
-        uiState.sessionsExpanded = false;
-        uiState.modelsExpanded = false;
+        if (!options.preserveUiState) {
+            uiState.sessionsExpanded = false;
+            uiState.modelsExpanded = false;
+        }
         const range = rangeForPreset(preset);
         const requestSeq = ++rangeRequestSeq;
         const result = statsForRange(range);
         if (result && typeof result.then === "function") {
-            result.then((stats) => {
+            return result.then((stats) => {
                 if (requestSeq !== rangeRequestSeq)
-                    return;
+                    return false;
                 applyStats(stats);
                 renderAll();
+                return true;
             }).catch(() => {
                 if (requestSeq !== rangeRequestSeq)
-                    return;
+                    return false;
                 applyStats(emptyStatsForRange(range, "无法加载原始记录"));
                 renderAll();
                 const chart = $("distributionChart");
                 if (chart)
                     chart.innerHTML = `<div class="dist-empty">无法加载原始记录</div>`;
                 setText("rangeSummary", `${range.label || "自定义范围"} · 无法加载原始记录`);
+                return false;
             });
-            return;
         }
         if (requestSeq !== rangeRequestSeq)
-            return;
+            return Promise.resolve(false);
         applyStats(result);
         renderAll();
+        return Promise.resolve(true);
     };
-    const availableStart = new Date(firstDataTime || Date.now() - 29 * DAY);
-    const availableEnd = new Date(latestDataTime || Date.now());
     const startDateInput = $("startDate");
     const endDateInput = $("endDate");
-    if (startDateInput && endDateInput) {
+    const syncAvailableRangeInputs = (resetValues = false) => {
+        if (!startDateInput || !endDateInput)
+            return;
+        const availableStart = new Date(firstDataTime || Date.now() - 29 * DAY);
+        const availableEnd = new Date(latestDataTime || Date.now());
         startDateInput.min = ymd(availableStart);
         startDateInput.max = ymd(availableEnd);
         endDateInput.min = ymd(availableStart);
         endDateInput.max = ymd(availableEnd);
-        startDateInput.value = ymd(localDayStart(availableEnd));
-        endDateInput.value = ymd(localDayStart(availableEnd));
+        if (resetValues || !startDateInput.value)
+            startDateInput.value = ymd(localDayStart(availableEnd));
+        if (resetValues || !endDateInput.value)
+            endDateInput.value = ymd(localDayStart(availableEnd));
+    };
+    syncAvailableRangeInputs(true);
+    if (startDateInput && endDateInput) {
         startDateInput.addEventListener("change", () => applyRange("custom"));
         endDateInput.addEventListener("change", () => applyRange("custom"));
     }
@@ -1406,6 +1420,32 @@
                 closeCostHelp();
         });
     }
+    window.CODEXSCOPE_APPLY_DATA = async (nextData) => {
+        if (!nextData || typeof nextData !== "object")
+            return false;
+        data = nextData;
+        window.CODEXSCOPE_DATA = nextData;
+        window.CODEXSCOPE_RAW_DATA = undefined;
+        rawDataPath = data.rawDataPath || "data.raw.js";
+        precomputedViews = data.views || {};
+        limits = data.limits || {};
+        latestDataTime = Number((data.availableRange || {}).end) || Date.now();
+        earliestDataTime = Number((data.availableRange || {}).start) || latestDataTime;
+        firstDataTime = Number.isFinite(earliestDataTime) ? earliestDataTime : latestDataTime;
+        sessionsCatalogCache = null;
+        sessionsCatalogRowsCache = null;
+        recordsCache = null;
+        ttfbRecordsCache = null;
+        failureRecordsCache = null;
+        rawDataPromise = null;
+        pricingRules = normalizePricingRules(data.pricingRules || window.CODEXSCOPE_SAMPLE_DATA?.pricingRules);
+        pricingCache.clear();
+        recordCostCache = new WeakMap();
+        renderPricingHelp();
+        renderDataMetadata();
+        syncAvailableRangeInputs();
+        return applyRange(activeRangePreset, { preserveUiState: true });
+    };
     renderPricingHelp();
     applyRange("today");
     $("toggleSessions")?.addEventListener("click", () => {

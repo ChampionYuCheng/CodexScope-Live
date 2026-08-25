@@ -39,7 +39,7 @@ The project has two modes:
 - Quota and risk status from local `rate_limits` events when available
 - Session and model rankings with local search filters
 - Estimated cost by model and token type, with USD and optional CNY display
-- Live refresh toggle, connection status, manual refresh, and scroll-position recovery
+- Live refresh toggle, connection status, and in-place manual or automatic data updates without reloading the page
 - Startup recovery that waits for the real `data.js` instead of remaining on sample data while the Go generator finishes
 - Six true tab pages for overview, quota, Token analytics, sessions, models and cost, and rate distribution
 - Adaptive first-screen density with a 2-by-2 overview grid and charts and rankings that expand into available vertical space
@@ -101,9 +101,9 @@ The Rust server polls the local Codex session directory, whose default location 
 - macOS/Linux: `~/.codex/sessions`
 - Windows: `%USERPROFILE%/.codex/sessions`
 
-When a JSONL session changes, the server invokes the existing Go generator and sends an SSE event to connected browsers. Enable live mode in the dashboard to reload the data automatically.
+When a JSONL session changes, the server invokes the existing Go generator and sends an SSE event to connected browsers. With live mode enabled, the browser replaces the in-memory dataset and redraws the data panels without reloading the document, so the active tab, scroll position, theme, and local controls remain stable.
 
-On first startup, the browser can briefly fall back to sample data when it opens before the Go generator finishes. The page probes for the real `data.js` and refreshes automatically when it becomes available, even when continuous live refresh is paused.
+On first startup, the browser can briefly fall back to sample data when it opens before the Go generator finishes. The page probes for the real `data.js` and applies it in place when it becomes available, even when continuous live refresh is paused.
 
 ### Run the live server manually
 

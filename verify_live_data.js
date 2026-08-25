@@ -10,6 +10,10 @@ const realFixture = sampleSource
   .replace("window.CODEXSCOPE_SAMPLE_DATA =", "window.CODEXSCOPE_DATA =")
   .replace("sample: true", "sample: false")
   .replace('generatedAt: "2026-05-09 00:16:00"', 'generatedAt: "2099-01-01 00:00:00"');
+const updatedFixture = realFixture.replace(
+  'generatedAt: "2099-01-01 00:00:00"',
+  'generatedAt: "2099-01-01 00:05:00"',
+);
 
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
@@ -17,9 +21,10 @@ const contentTypes = {
   ".js": "text/javascript; charset=utf-8",
 };
 
-async function startRaceServer({ generationError = false, statusMissing = false } = {}) {
+async function startRaceServer({ generationError = false, statusMissing = false, initialDataReady = false } = {}) {
   const privatePrefix = "/test-access-token";
-  let dataReady = false;
+  let dataReady = initialDataReady;
+  let dataFixture = realFixture;
   let dataRequests = 0;
   let pageLoads = 0;
   const eventStreams = new Set();
@@ -54,7 +59,7 @@ async function startRaceServer({ generationError = false, statusMissing = false 
 
     if (pathname === `${privatePrefix}/data.js`) {
       dataRequests += 1;
-      if (dataRequests === 1) {
+      if (!initialDataReady && dataRequests === 1) {
         setTimeout(() => { dataReady = true; }, 700);
       }
       if (!dataReady) {
@@ -66,7 +71,7 @@ async function startRaceServer({ generationError = false, statusMissing = false 
         "Cache-Control": "no-store",
         "Content-Type": contentTypes[".js"],
       });
-      response.end(realFixture);
+      response.end(dataFixture);
       return;
     }
 
@@ -96,6 +101,11 @@ async function startRaceServer({ generationError = false, statusMissing = false 
   return {
     url: `http://127.0.0.1:${address.port}${privatePrefix}/`,
     stats: () => ({ dataRequests, pageLoads }),
+    publishData: (fixture = updatedFixture) => {
+      dataFixture = fixture;
+      dataReady = true;
+      eventStreams.forEach((stream) => stream.write("event: data\ndata: changed\n\n"));
+    },
     close: async () => {
       eventStreams.forEach((stream) => stream.destroy());
       await new Promise((resolve) => server.close(resolve));
@@ -109,6 +119,7 @@ async function startRaceServer({ generationError = false, statusMissing = false 
   const page = await browser.newPage();
   let errorServer;
   let oldServer;
+  let liveUpdateServer;
   await page.addInitScript(() => localStorage.setItem("codexscope-live-enabled", "false"));
 
   try {
@@ -122,7 +133,18 @@ async function startRaceServer({ generationError = false, statusMissing = false 
 
     assert.equal(await page.locator("#syncText").textContent(), "00:00 已同步");
     assert.ok(raceServer.stats().dataRequests >= 2, "页面应重新探测已经就绪的 data.js");
-    assert.ok(raceServer.stats().pageLoads >= 2, "真实数据就绪后应自动刷新页面");
+    assert.equal(raceServer.stats().pageLoads, 1, "真实数据就绪后应只更新数据，不重新加载 HTML 页面");
+
+    liveUpdateServer = await startRaceServer({ initialDataReady: true });
+    const livePage = await browser.newPage();
+    await livePage.goto(liveUpdateServer.url, { waitUntil: "domcontentloaded" });
+    await livePage.waitForFunction(
+      () => document.querySelector("#liveStatusText")?.textContent === "实时监控中",
+    );
+    liveUpdateServer.publishData();
+    await livePage.waitForFunction(() => document.querySelector("#syncText")?.textContent === "00:05 已同步");
+    assert.equal(liveUpdateServer.stats().pageLoads, 1, "SSE 数据事件不应触发整页重载");
+    await livePage.close();
 
     errorServer = await startRaceServer({ generationError: true });
     const errorPage = await browser.newPage();
@@ -141,12 +163,13 @@ async function startRaceServer({ generationError = false, statusMissing = false 
       { timeout: 3000 },
     );
     await oldServerPage.close();
-    console.log("Live data verification passed: startup fallback recovers from sample to real data.");
+    console.log("Live data verification passed: startup and SSE updates replace data without page reload.");
   } finally {
     await browser.close();
     await raceServer.close();
     if (errorServer) await errorServer.close();
     if (oldServer) await oldServer.close();
+    if (liveUpdateServer) await liveUpdateServer.close();
   }
 })().catch((error) => {
   console.error(error.stack || error);

@@ -6,9 +6,8 @@
   if (!status || !statusText || !toggle || !refresh) return;
 
   const isServerMode = location.protocol === "http:" || location.protocol === "https:";
-  const initialGeneratedAt = window.CODEXSCOPE_DATA?.generatedAt || null;
   let enabled = localStorage.getItem("codexscope-live-enabled") !== "false";
-  let reloading = false;
+  let refreshPromise = null;
   let streamConnected = false;
   let generationState = "pending";
 
@@ -62,14 +61,50 @@
     }
   };
 
-  const reloadPage = () => {
-    if (reloading) return;
-    reloading = true;
-    sessionStorage.setItem("codexscope-scroll-y", String(window.scrollY));
-    location.reload();
+  const loadLatestData = () => {
+    if (refreshPromise) return refreshPromise;
+    refresh.disabled = true;
+    refreshPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = `data.js?codexscope-update=${Date.now()}`;
+      script.async = true;
+      script.onload = async () => {
+        script.remove();
+        try {
+          if (!window.CODEXSCOPE_DATA || !window.CODEXSCOPE_APPLY_DATA) {
+            throw new Error("dashboard data updater unavailable");
+          }
+          const applied = await window.CODEXSCOPE_APPLY_DATA(window.CODEXSCOPE_DATA);
+          if (!applied) throw new Error("dashboard rejected updated data");
+          generationState = "ok";
+          renderLiveStatus();
+          resolve(true);
+        } catch (error) {
+          reject(error);
+        }
+      };
+      script.onerror = () => {
+        script.remove();
+        reject(new Error("failed to load data.js"));
+      };
+      document.head.appendChild(script);
+    }).catch(() => {
+      setStatus("offline", "数据刷新失败，等待重试…");
+      return false;
+    }).finally(() => {
+      refreshPromise = null;
+      refresh.disabled = false;
+    });
+    return refreshPromise;
   };
 
-  refresh.addEventListener("click", reloadPage);
+  refresh.addEventListener("click", () => {
+    if (!isServerMode) {
+      location.reload();
+      return;
+    }
+    void loadLatestData();
+  });
   toggle.addEventListener("click", () => {
     enabled = !enabled;
     localStorage.setItem("codexscope-live-enabled", String(enabled));
@@ -78,12 +113,6 @@
     else renderLiveStatus();
   });
   updateToggle();
-
-  const savedScroll = Number(sessionStorage.getItem("codexscope-scroll-y"));
-  if (Number.isFinite(savedScroll) && savedScroll > 0) {
-    sessionStorage.removeItem("codexscope-scroll-y");
-    requestAnimationFrame(() => window.scrollTo(0, savedScroll));
-  }
 
   if (!isServerMode || !window.EventSource) {
     toggle.disabled = true;
@@ -97,15 +126,15 @@
   };
   const startupProbeStartedAt = Date.now();
   const probeForGeneratedData = async () => {
-    if (reloading) return;
     try {
       const response = await fetch(`data.js?codexscope-ready=${Date.now()}`, { cache: "no-store" });
       if (!response.ok) return;
       const source = await response.text();
       if (!source.includes("window.CODEXSCOPE_DATA")) return;
       const generatedAt = payloadGeneratedAt(source);
-      if (!window.CODEXSCOPE_DATA || (generatedAt && generatedAt !== initialGeneratedAt)) {
-        reloadPage();
+      const currentGeneratedAt = window.CODEXSCOPE_DATA?.generatedAt || null;
+      if (!window.CODEXSCOPE_DATA || (generatedAt && generatedAt !== currentGeneratedAt)) {
+        await loadLatestData();
       }
     } catch {
       // The live server may still be starting; the next probe will retry.
@@ -132,7 +161,7 @@
   };
   events.addEventListener("data", () => {
     generationState = "ok";
-    if (enabled) reloadPage();
+    if (enabled) void loadLatestData();
     else renderLiveStatus();
   });
   events.addEventListener("generation-error", () => {
