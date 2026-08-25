@@ -7,7 +7,7 @@
 
 CodexScope Live 是一个本地优先的 Codex 用量面板，用于查看本机 Codex 会话日志中的 Token 消耗、额度状态、模型分布、会话活跃度、调用分布、缓存命中率和费用估算。
 
-![CodexScope Live 面板](assets/codexscope-dashboard-24h.png)
+!![img.png](img.png)(assets/codexscope-dashboard-24h.png)
 
 ## 原项目署名与许可证
 

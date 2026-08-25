@@ -7,7 +7,7 @@ English | [简体中文](README.zh-CN.md)
 
 CodexScope Live is a local-first dashboard for understanding Codex usage from local session logs. It turns token usage, quota status, model mix, session activity, request distribution, cache hits, and estimated cost into a desktop-friendly view.
 
-![CodexScope Live dashboard](assets/codexscope-dashboard-24h.png)
+!![img_1.png](img_1.png)(assets/codexscope-dashboard-24h.png)
 
 ## Attribution
 
