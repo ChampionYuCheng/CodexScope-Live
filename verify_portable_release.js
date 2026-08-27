@@ -119,7 +119,13 @@ async function startAttackerPage(scriptUrl) {
   const address = server.address();
   return {
     url: `http://127.0.0.1:${address.port}/`,
-    close: () => new Promise((resolve) => server.close(resolve)),
+    close: () => new Promise((resolve, reject) => {
+      server.close((error) => {
+        if (error && error.code !== "ERR_SERVER_NOT_RUNNING") reject(error);
+        else resolve();
+      });
+      server.closeAllConnections?.();
+    }),
   };
 }
 
@@ -266,7 +272,10 @@ async function main() {
   } finally {
     if (browser) await browser.close();
     if (attacker) await attacker.close();
-    if (server && !server.killed) server.kill();
+    if (server && server.exitCode === null) {
+      server.kill();
+      await waitForProcessExit(server).catch(() => undefined);
+    }
     fs.rmSync(extractionRoot, { recursive: true, force: true });
     fs.rmSync(sessionsRoot, { recursive: true, force: true });
     fs.rmSync(dataRoot, { recursive: true, force: true });
