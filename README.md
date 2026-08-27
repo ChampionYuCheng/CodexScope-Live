@@ -59,21 +59,22 @@ The project has two modes:
 
 ### Windows portable live dashboard (recommended)
 
-Regular users should download `CodexScope-Live-v0.2.0-Windows-x64.zip` and its matching `.sha256` file from [GitHub Releases](https://github.com/ChampionYuCheng/CodexScope-Live/releases). Do not use GitHub's automatically generated `Source code` archives.
+Regular users should download `CodexScope-Live-v0.3.0-Windows-x64.zip` and its matching `.sha256` file from [GitHub Releases](https://github.com/ChampionYuCheng/CodexScope-Live/releases). Do not use GitHub's automatically generated `Source code` archives.
 
 1. Extract the entire ZIP.
 2. Double-click `CodexScope-Live.exe`.
-3. The app opens `http://127.0.0.1:48173/` automatically.
+3. The app opens `http://127.0.0.1:48173/` automatically without leaving a PowerShell or Command Prompt window open.
+4. Use **Exit app** in the dashboard header when you want to stop the local service.
 
-The portable package includes the Rust live server and the precompiled Go data generator. It does not require Node.js, Go, Rust, or manually configured environment variables. It automatically reads `%USERPROFILE%/.codex/sessions`; if no local Codex session exists yet, the dashboard initially shows sample data. Generated dashboard data and caches are stored under `%LOCALAPPDATA%/CodexScope-Live`, not in the extracted application directory.
+The portable package includes the Rust live server and the precompiled Go data generator. It does not require Node.js, Go, Rust, or manually configured environment variables. The Windows server uses the GUI subsystem, opens the browser through the Windows shell, and runs its generator without console popups. Startup failures are shown in a native dialog and recorded in `%LOCALAPPDATA%/CodexScope-Live/codexscope-live.log`. It automatically reads `%USERPROFILE%/.codex/sessions`; if no local Codex session exists yet, the dashboard initially shows sample data. Generated dashboard data and caches are stored under `%LOCALAPPDATA%/CodexScope-Live`, not in the extracted application directory.
 
 The bookmark-friendly address remains `http://127.0.0.1:48173/`. Each launch redirects it to a random private path. Do not share the redirected address while the app is running because it grants access to the current local dashboard.
 
 Windows SmartScreen may report an unknown publisher because the executable is not commercially code-signed. Confirm that the download came from this repository's Release page and verify it against the matching `.sha256` file before running it:
 
 ~~~powershell
-Get-FileHash .\CodexScope-Live-v0.2.0-Windows-x64.zip -Algorithm SHA256
-Get-Content .\CodexScope-Live-v0.2.0-Windows-x64.zip.sha256
+Get-FileHash .\CodexScope-Live-v0.3.0-Windows-x64.zip -Algorithm SHA256
+Get-Content .\CodexScope-Live-v0.3.0-Windows-x64.zip.sha256
 ~~~
 
 The two hashes must match exactly.
@@ -89,13 +90,13 @@ When opened with `file://`, the page works as a static preview. Live refresh is 
 
 ### Run the Windows live dashboard from source
 
-The Windows launcher starts the local Rust server at `http://127.0.0.1:48173/`:
+For a source checkout, double-click the hidden launcher:
 
 ~~~text
-windows/open-dashboard.cmd
+Start-CodexScope-Live.vbs
 ~~~
 
-Double-click the script, or run it from a terminal. The launcher uses a local `codexscope-live.exe` when one is available. Otherwise, it falls back to `cargo run`. This path is intended for developers, not regular users.
+It starts the existing Windows source launcher without leaving a terminal window visible. The developer-oriented `windows/open-dashboard.cmd` remains available when console output is useful; it builds the current Rust source with Cargo before falling back to a cached release binary.
 
 For a source checkout, install:
 
@@ -188,7 +189,7 @@ npm.cmd run release:windows
 npm.cmd run check:release:windows
 ~~~
 
-The artifacts are written to `dist/CodexScope-Live-v0.2.0-Windows-x64.zip` and a matching `.sha256` file. The verifier extracts that final ZIP into a temporary directory, checks both executables are Windows x64, validates the checksum, runs a real JSONL fixture through the bundled generator, confirms private runtime data stays outside the app directory, and checks that a cross-origin page cannot load `data.js`. The existing `npm run release:local` command remains available for the legacy cross-platform static-package flow.
+The artifacts are written to `dist/CodexScope-Live-v0.3.0-Windows-x64.zip` and a matching `.sha256` file. The verifier extracts that final ZIP into a temporary directory, checks both executables are Windows x64, validates the checksum and GUI subsystem, runs a real JSONL fixture through the bundled generator, confirms private runtime data stays outside the app directory, checks that a cross-origin page cannot load `data.js`, and exercises the authenticated shutdown flow. The existing `npm run release:local` command remains available for the legacy cross-platform static-package flow.
 
 ## Data flow
 
@@ -219,7 +220,8 @@ When available, the dashboard retrieves the USD/CNY rate from the Frankfurter AP
 - `generate_codex_data.go`: local usage-data generator
 - `data.sample.js`: bundled sample data
 - `macos/open-dashboard.command`: macOS data-generation launcher
-- `windows/open-dashboard.cmd`: Windows live-server launcher
+- `Start-CodexScope-Live.vbs`: no-console double-click launcher for Windows source checkouts
+- `windows/open-dashboard.cmd`: developer-oriented Windows live-server launcher
 - `scripts/build-release.sh`: legacy cross-platform static-package builder
 - `scripts/build-windows-release.ps1`: Windows x64 portable live-package builder
 - `release-manifest.json`: shared runtime-file contract used by the Windows builder and verifier

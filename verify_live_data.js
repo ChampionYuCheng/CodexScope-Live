@@ -150,7 +150,7 @@ async function startRaceServer({ generationError = false, statusMissing = false,
     const errorPage = await browser.newPage();
     await errorPage.goto(errorServer.url, { waitUntil: "domcontentloaded" });
     await errorPage.waitForFunction(
-      () => document.querySelector("#liveStatusText")?.textContent === "数据生成失败，请查看程序窗口",
+      () => document.querySelector("#liveStatusText")?.textContent === "数据生成失败，请查看本地日志",
     );
     await errorPage.close();
 

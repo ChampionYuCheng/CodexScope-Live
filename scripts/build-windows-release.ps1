@@ -133,7 +133,7 @@ CodexScope-Live v$version Windows x64 免安装版
 3. 程序会自动打开 http://127.0.0.1:48173/。
 4. 默认读取当前 Windows 用户的 .codex\sessions，无需配置环境变量。
 5. 运行数据保存在 %LOCALAPPDATA%\CodexScope-Live，不写入解压目录。
-6. 关闭本程序的控制台窗口即可停止实时服务。
+6. 页面顶部点击“退出程序”即可停止后台实时服务；程序不会常驻黑色终端窗口。
 
 如果 Windows SmartScreen 提示未知发布者，请核对下载来源和 GitHub Release 的校验信息后选择“更多信息 > 仍要运行”。
 本程序仅监听 127.0.0.1，并使用每次启动生成的私有访问地址保护本地会话数据。

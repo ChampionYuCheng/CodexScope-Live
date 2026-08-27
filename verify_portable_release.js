@@ -30,6 +30,12 @@ function peMachine(filePath) {
   assert.equal(body.subarray(peOffset, peOffset + 4).toString("binary"), "PE\u0000\u0000");
   return body.readUInt16LE(peOffset + 4);
 }
+function peSubsystem(filePath) {
+  const body = fs.readFileSync(filePath);
+  const peOffset = body.readUInt32LE(0x3c);
+  const optionalHeaderOffset = peOffset + 24;
+  return body.readUInt16LE(optionalHeaderOffset + 68);
+}
 
 function reservePort() {
   return new Promise((resolve, reject) => {
@@ -43,6 +49,14 @@ function reservePort() {
       });
     });
   });
+}
+
+async function waitForProcessExit(child, timeoutMs = 5_000) {
+  if (child.exitCode !== null) return child.exitCode;
+  return Promise.race([
+    new Promise((resolve) => child.once("exit", resolve)),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("server did not exit after shutdown")), timeoutMs)),
+  ]);
 }
 
 async function waitForResponse(url, predicate = (response) => response.ok, timeoutMs = 15_000) {
@@ -110,7 +124,7 @@ async function startAttackerPage(scriptUrl) {
 }
 
 async function main() {
-  assert.equal(packageMetadata.version, "0.2.0", "portable hardening release must be v0.2.0");
+  assert.equal(packageMetadata.version, "0.3.0", "friendly startup release must be v0.3.0");
   assert.ok(isFile(archivePath), `missing release archive: ${archivePath}`);
   assert.ok(isFile(checksumPath), `missing release checksum: ${checksumPath}`);
 
@@ -163,6 +177,7 @@ async function main() {
     }
 
     assert.equal(peMachine(path.join(packageRoot, "CodexScope-Live.exe")), 0x8664, "server is not x64");
+    assert.equal(peSubsystem(path.join(packageRoot, "CodexScope-Live.exe")), 2, "server must use the Windows GUI subsystem");
     assert.equal(peMachine(path.join(packageRoot, "codexscope-generator.exe")), 0x8664, "generator is not x64");
 
     const placeholderHash = sha256(path.join(packageRoot, "data.js"));
@@ -227,6 +242,7 @@ async function main() {
       () => document.querySelector("#sourcePrimary")?.textContent === "Codex 桌面端",
     );
     assert.deepEqual(pageErrors, [], `packaged dashboard page errors: ${pageErrors.join("; ")}`);
+    assert.equal(await appPage.locator("#exitApp").isVisible(), true, "packaged dashboard must expose a friendly exit control");
 
     attacker = await startAttackerPage(new URL("data.js", tokenBaseUrl).href);
     const page = await browser.newPage();
@@ -236,6 +252,14 @@ async function main() {
       "undefined",
       "cross-origin page loaded private Codex data",
     );
+    const unprotectedShutdown = await fetch(`${baseUrl}/shutdown`, { method: "POST", redirect: "manual" });
+    assert.equal(unprotectedShutdown.status, 404, "shutdown must require the private access token");
+    appPage.once("dialog", (dialog) => dialog.accept());
+    await appPage.locator("#exitApp").click();
+    await appPage.waitForFunction(
+      () => document.querySelector("#liveStatusText")?.textContent === "程序已退出，可以关闭页面",
+    );
+    await waitForProcessExit(server);
   } catch (error) {
     error.message += `\nserver output:\n${output.join("")}`;
     throw error;

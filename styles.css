@@ -574,6 +574,17 @@ button {
 
 .live-button:disabled { cursor: not-allowed; opacity: .65; }
 
+.exit-button {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 35%, var(--line));
+}
+
+.exit-button:hover:not(:disabled) {
+  color: #fff;
+  border-color: var(--red);
+  background: var(--red);
+}
+
 .topbar {
   height: 60px;
   display: grid;

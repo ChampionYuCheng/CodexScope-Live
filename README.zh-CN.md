@@ -59,21 +59,22 @@ CodexScope Live 读取本机 Codex JSONL 会话日志中已经存在的用量元
 
 ### Windows 免安装实时面板（推荐）
 
-普通用户请从 [GitHub Releases](https://github.com/ChampionYuCheng/CodexScope-Live/releases) 下载 `CodexScope-Live-v0.2.0-Windows-x64.zip` 及其同名 `.sha256` 文件，不要下载 GitHub 自动生成的 `Source code` 压缩包。
+普通用户请从 [GitHub Releases](https://github.com/ChampionYuCheng/CodexScope-Live/releases) 下载 `CodexScope-Live-v0.3.0-Windows-x64.zip` 及其同名 `.sha256` 文件，不要下载 GitHub 自动生成的 `Source code` 压缩包。
 
 1. 解压整个 ZIP。
 2. 双击 `CodexScope-Live.exe`。
-3. 程序自动打开 `http://127.0.0.1:48173/`。
+3. 程序自动打开 `http://127.0.0.1:48173/`，不会常驻 PowerShell 或 CMD 黑色窗口。
+4. 不再使用时，点击页面顶部的“退出程序”即可停止本地服务。
 
-便携包已经包含 Rust 实时服务和 Go 数据生成器，不需要安装 Node.js、Go、Rust，也不需要配置环境变量。程序自动读取当前 Windows 用户的 `%USERPROFILE%/.codex/sessions`；如果还没有本地 Codex 会话，则先显示示例数据。真实面板数据和缓存保存在 `%LOCALAPPDATA%/CodexScope-Live`，不会写进解压后的程序目录。
+便携包已经包含 Rust 实时服务和 Go 数据生成器，不需要安装 Node.js、Go、Rust，也不需要配置环境变量。 Windows 服务使用 GUI 子系统，通过系统接口打开浏览器，并隐藏数据生成器子进程。启动失败时会显示原生提示框，同时把诊断信息写入 `%LOCALAPPDATA%/CodexScope-Live/codexscope-live.log`。程序自动读取当前 Windows 用户的 `%USERPROFILE%/.codex/sessions`；如果还没有本地 Codex 会话，则先显示示例数据。真实面板数据和缓存保存在 `%LOCALAPPDATA%/CodexScope-Live`，不会写进解压后的程序目录。
 
 浏览器收藏夹继续保存 `http://127.0.0.1:48173/` 即可。每次启动时，程序会把它重定向到本次运行随机生成的私有路径。程序运行期间不要分享重定向后的完整地址，因为该地址可以访问当前本地面板。
 
 Windows SmartScreen 可能因为程序暂未进行代码签名而显示“未知发布者”。请确认下载地址是本仓库的 Release，并在运行前核对 SHA256：
 
 ~~~powershell
-Get-FileHash .\CodexScope-Live-v0.2.0-Windows-x64.zip -Algorithm SHA256
-Get-Content .\CodexScope-Live-v0.2.0-Windows-x64.zip.sha256
+Get-FileHash .\CodexScope-Live-v0.3.0-Windows-x64.zip -Algorithm SHA256
+Get-Content .\CodexScope-Live-v0.3.0-Windows-x64.zip.sha256
 ~~~
 
 两处哈希值必须完全一致。
@@ -89,13 +90,13 @@ Get-Content .\CodexScope-Live-v0.2.0-Windows-x64.zip.sha256
 
 ### 从源码运行 Windows 实时面板
 
-Windows 启动脚本会在 `http://127.0.0.1:48173/` 启动本地 Rust 服务：
+从源码运行时，可以直接双击隐藏启动器：
 
 ~~~text
-windows/open-dashboard.cmd
+Start-CodexScope-Live.vbs
 ~~~
 
-可以双击脚本，也可以在终端中运行。脚本会优先使用本地已有的 `codexscope-live.exe`；找不到时回退到 `cargo run`。此方式面向开发者，不是普通用户推荐入口。
+它会调用现有 Windows 源码启动流程，但不会留下终端窗口。需要观察构建输出的开发者仍可运行 `windows/open-dashboard.cmd`；该脚本优先使用 Cargo 构建当前 Rust 源码，Cargo 不可用时才回退到缓存的 Release 程序。
 
 从源码运行时，需要准备：
 
@@ -188,7 +189,7 @@ npm.cmd run release:windows
 npm.cmd run check:release:windows
 ~~~
 
-产物位于 `dist/CodexScope-Live-v0.2.0-Windows-x64.zip`，同时生成同名 `.sha256` 校验文件。验证脚本会先把最终 ZIP 解压到临时目录，再检查两个 EXE 都是 Windows x64、校验 SHA256、让包内生成器解析一份真实 JSONL 测试数据、确认私有运行数据没有写入程序目录，并验证跨域网页无法加载 `data.js`。原有 `npm run release:local` 继续保留给旧的跨平台静态包流程。
+产物位于 `dist/CodexScope-Live-v0.3.0-Windows-x64.zip`，同时生成同名 `.sha256` 校验文件。验证脚本会先把最终 ZIP 解压到临时目录，再检查两个 EXE 都是 Windows x64、主程序采用 GUI 子系统、校验 SHA256、让包内生成器解析一份真实 JSONL 测试数据、确认私有运行数据没有写入程序目录、验证跨域网页无法加载 `data.js`，并实际测试带私有令牌的退出流程。原有 `npm run release:local` 继续保留给旧的跨平台静态包流程。
 
 ## 数据流
 
@@ -219,7 +220,8 @@ npm.cmd run check:release:windows
 - `generate_codex_data.go`：本地用量数据生成器
 - `data.sample.js`：内置示例数据
 - `macos/open-dashboard.command`：macOS 数据生成启动脚本
-- `windows/open-dashboard.cmd`：Windows 实时服务启动脚本
+- `Start-CodexScope-Live.vbs`：Windows 源码目录双击无黑窗启动器
+- `windows/open-dashboard.cmd`：面向开发者的 Windows 实时服务启动脚本
 - `scripts/build-release.sh`：旧的跨平台静态 Release 包构建脚本
 - `scripts/build-windows-release.ps1`：Windows x64 免安装实时包构建脚本
 - `release-manifest.json`：Windows 构建脚本和验证脚本共用的运行文件清单

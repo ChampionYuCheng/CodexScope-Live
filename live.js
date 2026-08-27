@@ -3,13 +3,19 @@
   const statusText = document.getElementById("liveStatusText");
   const toggle = document.getElementById("liveToggle");
   const refresh = document.getElementById("manualRefresh");
-  if (!status || !statusText || !toggle || !refresh) return;
+  const exitApp = document.getElementById("exitApp");
+  if (!status || !statusText || !toggle || !refresh || !exitApp) return;
 
   const isServerMode = location.protocol === "http:" || location.protocol === "https:";
   let enabled = localStorage.getItem("codexscope-live-enabled") !== "false";
   let refreshPromise = null;
   let streamConnected = false;
   let generationState = "pending";
+  let startupProbe = null;
+  let events = null;
+  let stopping = false;
+
+  exitApp.hidden = !isServerMode;
 
   const setStatus = (state, text) => {
     status.className = `live-status ${state}`;
@@ -22,12 +28,13 @@
   };
 
   const renderLiveStatus = () => {
+    if (stopping) return;
     if (!streamConnected) {
       setStatus("connecting", "连接实时服务…");
       return;
     }
     if (generationState === "error") {
-      setStatus("offline", "数据生成失败，请查看程序窗口");
+      setStatus("offline", "数据生成失败，请查看本地日志");
       return;
     }
     if (generationState === "incompatible") {
@@ -112,10 +119,34 @@
     if (!isServerMode) setStatus("static", "静态预览");
     else renderLiveStatus();
   });
+  exitApp.addEventListener("click", async () => {
+    if (!isServerMode || stopping) return;
+    if (!window.confirm("退出 CodexScope-Live？后台实时服务将停止。")) return;
+    stopping = true;
+    exitApp.disabled = true;
+    exitApp.textContent = "正在退出…";
+    setStatus("connecting", "正在安全退出…");
+    try {
+      const response = await fetch("shutdown", { method: "POST", cache: "no-store" });
+      if (response.status !== 202) throw new Error(`shutdown ${response.status}`);
+      if (startupProbe !== null) window.clearInterval(startupProbe);
+      if (events) events.close();
+      toggle.disabled = true;
+      refresh.disabled = true;
+      exitApp.textContent = "已退出";
+      setStatus("offline", "程序已退出，可以关闭页面");
+    } catch {
+      stopping = false;
+      exitApp.disabled = false;
+      exitApp.textContent = "退出程序";
+      setStatus("offline", "退出失败，请重试");
+    }
+  });
   updateToggle();
 
   if (!isServerMode || !window.EventSource) {
     toggle.disabled = true;
+    exitApp.hidden = true;
     setStatus("static", "静态预览");
     return;
   }
@@ -140,22 +171,24 @@
       // The live server may still be starting; the next probe will retry.
     }
   };
-  const startupProbe = window.setInterval(() => {
+  startupProbe = window.setInterval(() => {
     const hasRealData = Boolean(window.CODEXSCOPE_DATA);
     if (hasRealData && Date.now() - startupProbeStartedAt > 30_000) {
       window.clearInterval(startupProbe);
+      startupProbe = null;
       return;
     }
     void probeForGeneratedData();
   }, 750);
 
   renderLiveStatus();
-  const events = new EventSource("events");
+  events = new EventSource("events");
   events.onopen = () => {
     streamConnected = true;
     void refreshGenerationStatus();
   };
   events.onerror = () => {
+    if (stopping) return;
     streamConnected = false;
     setStatus("offline", "实时服务断开，正在重试…");
   };

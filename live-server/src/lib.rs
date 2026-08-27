@@ -135,6 +135,10 @@ pub fn private_route<'a>(target: &'a str, access_token: &str) -> Option<&'a str>
     remainder.strip_prefix('/')
 }
 
+pub fn is_shutdown_request(method: &str, relative: &str) -> bool {
+    method == "POST" && relative == "shutdown"
+}
+
 pub fn is_public_asset(relative: &Path) -> bool {
     let normalized = relative.to_string_lossy().replace('\\', "/");
     matches!(
@@ -440,6 +444,13 @@ mod tests {
         );
         assert_eq!(private_route("/data.js", "secret-token"), None);
         assert_eq!(private_route("/wrong/data.js", "secret-token"), None);
+    }
+
+    #[test]
+    fn accepts_only_private_shutdown_posts() {
+        assert!(is_shutdown_request("POST", "shutdown"));
+        assert!(!is_shutdown_request("GET", "shutdown"));
+        assert!(!is_shutdown_request("POST", "status"));
     }
 
     #[test]

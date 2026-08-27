@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.0 - 2026-08-27
+
+- Switched the Windows release executable to the GUI subsystem so double-click startup no longer leaves a PowerShell or Command Prompt window open.
+- Opened the browser through the Windows shell and hid generator child processes to prevent transient console flashes.
+- Added a no-console `Start-CodexScope-Live.vbs` launcher for source checkouts while preserving the developer CMD workflow.
+- Added an authenticated **退出程序** control that stops the local service without exposing an unprotected shutdown endpoint.
+- Added native startup-error dialogs and `%LOCALAPPDATA%/CodexScope-Live/codexscope-live.log` diagnostics for the console-free runtime.
+- Expanded final-ZIP verification to assert the PE GUI subsystem, click the real exit control, and wait for the packaged process to terminate.
 ## v0.2.0 - 2026-08-25
 
 - Protected local dashboard routes with a cryptographically random per-run access path and same-origin browser resource policy.

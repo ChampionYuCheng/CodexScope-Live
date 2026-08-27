@@ -1,18 +1,24 @@
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
+
 use codexscope_live::{
     configuration_signature, content_type, dashboard_url, data_event, generate_access_token,
     generation_error_event, generation_status_json, health_response, is_compatible_health_response,
-    is_public_asset, private_route, safe_relative_path, security_headers, session_signature,
-    GenerationStatus, ServerConfig,
+    is_public_asset, is_shutdown_request, private_route, safe_relative_path, security_headers,
+    session_signature, GenerationStatus, ServerConfig,
 };
 use std::env;
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 type Clients = Arc<Mutex<Vec<mpsc::Sender<String>>>>;
 
@@ -20,25 +26,32 @@ type Clients = Arc<Mutex<Vec<mpsc::Sender<String>>>>;
 struct AppState {
     root: PathBuf,
     data_dir: PathBuf,
+    log_path: PathBuf,
     access_token: String,
     configuration_signature: String,
     generation_status: Arc<Mutex<GenerationStatus>>,
     clients: Clients,
+    shutdown: Arc<AtomicBool>,
 }
 
 fn main() {
     let config = ServerConfig::from_args(env::args());
     let dashboard_url = dashboard_url(config.port);
+    let log_path = config.data_dir.join("codexscope-live.log");
     if let Err(error) = fs::create_dir_all(&config.root) {
-        eprintln!("无法准备面板目录 {}: {error}", config.root.display());
-        std::process::exit(1);
+        fatal_error(
+            &log_path,
+            format!("无法准备面板目录 {}: {error}", config.root.display()),
+        );
     }
     if let Err(error) = fs::create_dir_all(&config.data_dir) {
-        eprintln!(
-            "无法准备本地数据目录 {}: {error}",
-            config.data_dir.display()
+        fatal_error(
+            &log_path,
+            format!(
+                "无法准备本地数据目录 {}: {error}",
+                config.data_dir.display()
+            ),
         );
-        std::process::exit(1);
     }
     let instance_signature =
         configuration_signature(&config.root, &config.sessions, &config.data_dir);
@@ -49,58 +62,69 @@ fn main() {
             if error.kind() == io::ErrorKind::AddrInUse
                 && existing_live_server(config.port, &instance_signature) =>
         {
-            println!("CodexScope-Live 已在运行: {dashboard_url}");
+            log_message(&log_path, &format!("复用已运行实例: {dashboard_url}"));
             if config.open_browser {
-                let _ = open_dashboard(&dashboard_url);
+                if let Err(error) = open_dashboard(&dashboard_url) {
+                    show_error(&format!(
+                        "无法自动打开浏览器，请手动访问 {dashboard_url}: {error}"
+                    ));
+                }
             }
             return;
         }
-        Err(error) if error.kind() == io::ErrorKind::AddrInUse => {
-            eprintln!(
-                "端口 {} 已被其他程序或不兼容的 CodexScope-Live 实例占用。请关闭旧窗口后重试，或使用 --port 指定其他端口。",
+        Err(error) if error.kind() == io::ErrorKind::AddrInUse => fatal_error(
+            &log_path,
+            format!(
+                "端口 {} 已被其他程序或不兼容的 CodexScope-Live 实例占用。请关闭旧实例后重试。",
                 config.port
-            );
-            std::process::exit(1);
-        }
-        Err(error) => {
-            eprintln!("无法监听 {dashboard_url}: {error}");
-            std::process::exit(1);
-        }
+            ),
+        ),
+        Err(error) => fatal_error(&log_path, format!("无法监听 {dashboard_url}: {error}")),
     };
-    listener
-        .set_nonblocking(true)
-        .expect("failed to configure local listener");
+    if let Err(error) = listener.set_nonblocking(true) {
+        fatal_error(&log_path, format!("无法配置本地监听服务: {error}"));
+    }
 
     let access_token = generate_access_token().unwrap_or_else(|error| {
-        eprintln!("无法生成本地安全访问令牌: {error}");
-        std::process::exit(1);
+        fatal_error(&log_path, format!("无法生成本地安全访问令牌: {error}"))
     });
-
+    let shutdown = Arc::new(AtomicBool::new(false));
     let state = AppState {
         root: config.root.clone(),
         data_dir: config.data_dir.clone(),
+        log_path: log_path.clone(),
         access_token,
         configuration_signature: instance_signature,
         generation_status: Arc::new(Mutex::new(GenerationStatus::Pending)),
         clients: Arc::new(Mutex::new(Vec::new())),
+        shutdown: shutdown.clone(),
     };
     let monitor_state = state.clone();
     let monitor_config = config.clone();
     thread::spawn(move || monitor_sessions(monitor_config, monitor_state));
 
     if !config.sessions.is_dir() {
-        eprintln!(
-            "未找到 Codex 会话目录 {}，暂时显示示例数据。运行 Codex 后会自动检测。",
-            config.sessions.display()
+        log_message(
+            &log_path,
+            &format!(
+                "未找到 Codex 会话目录 {}，暂时显示示例数据。",
+                config.sessions.display()
+            ),
         );
     }
-    println!("CodexScope-Live: {dashboard_url}");
+    log_message(
+        &log_path,
+        &format!("CodexScope-Live 已启动: {dashboard_url}"),
+    );
     if config.open_browser {
         if let Err(error) = open_dashboard(&dashboard_url) {
-            eprintln!("无法自动打开浏览器，请手动访问 {dashboard_url}: {error}");
+            show_error(&format!(
+                "无法自动打开浏览器，请手动访问 {dashboard_url}: {error}"
+            ));
+            log_message(&log_path, &format!("自动打开浏览器失败: {error}"));
         }
     }
-    loop {
+    while !shutdown.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok((stream, _)) => {
                 let connection_state = state.clone();
@@ -109,9 +133,10 @@ fn main() {
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(20));
             }
-            Err(error) => eprintln!("接受浏览器连接失败: {error}"),
+            Err(error) => log_message(&log_path, &format!("接受浏览器连接失败: {error}")),
         }
     }
+    log_message(&log_path, "CodexScope-Live 已由页面安全退出。");
 }
 
 fn existing_live_server(port: u16, expected_signature: &str) -> bool {
@@ -134,10 +159,41 @@ fn existing_live_server(port: u16, expected_signature: &str) -> bool {
 
 #[cfg(target_os = "windows")]
 fn open_dashboard(url: &str) -> io::Result<()> {
-    Command::new("cmd")
-        .args(["/C", "start", "", url])
-        .spawn()
-        .map(|_| ())
+    use std::ffi::{c_void, OsStr};
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "shell32")]
+    extern "system" {
+        fn ShellExecuteW(
+            window: *mut c_void,
+            operation: *const u16,
+            file: *const u16,
+            parameters: *const u16,
+            directory: *const u16,
+            show_command: i32,
+        ) -> isize;
+    }
+
+    let operation: Vec<u16> = OsStr::new("open").encode_wide().chain(Some(0)).collect();
+    let target: Vec<u16> = OsStr::new(url).encode_wide().chain(Some(0)).collect();
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            operation.as_ptr(),
+            target.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            1,
+        )
+    };
+    if result > 32 {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("Windows ShellExecuteW 返回错误码 {result}"),
+        ))
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -150,6 +206,17 @@ fn open_dashboard(url: &str) -> io::Result<()> {
     Command::new("xdg-open").arg(url).spawn().map(|_| ())
 }
 
+fn hidden_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    let mut command = Command::new(program);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
 fn monitor_sessions(config: ServerConfig, state: AppState) {
     let mut previous = session_signature(&config.sessions).ok();
     match run_generator(&config) {
@@ -157,11 +224,14 @@ fn monitor_sessions(config: ServerConfig, state: AppState) {
         Err(error) => {
             set_generation_status(&state, GenerationStatus::Error);
             broadcast(&state.clients, generation_error_event());
-            eprintln!("首次生成本地数据失败，继续使用示例数据: {error}");
+            log_message(
+                &state.log_path,
+                &format!("首次生成本地数据失败，继续使用示例数据: {error}"),
+            );
         }
     }
 
-    loop {
+    while !state.shutdown.load(Ordering::SeqCst) {
         thread::sleep(Duration::from_millis(config.interval_ms));
         let current = session_signature(&config.sessions).ok();
         if current == previous {
@@ -176,7 +246,10 @@ fn monitor_sessions(config: ServerConfig, state: AppState) {
             Err(error) => {
                 set_generation_status(&state, GenerationStatus::Error);
                 broadcast(&state.clients, generation_error_event());
-                eprintln!("检测到日志变化，但生成数据失败: {error}");
+                log_message(
+                    &state.log_path,
+                    &format!("检测到日志变化，但生成数据失败: {error}"),
+                );
             }
         }
     }
@@ -193,7 +266,7 @@ fn run_generator(config: &ServerConfig) -> io::Result<()> {
     let output = config.data_dir.join("data.js");
     let cache = config.data_dir.join(".codexscope-cache.json");
     if let Some(generator) = find_generator(config) {
-        let status = Command::new(generator)
+        let status = hidden_command(generator)
             .current_dir(&config.root)
             .args([
                 "--root",
@@ -220,7 +293,7 @@ fn run_generator(config: &ServerConfig) -> io::Result<()> {
             "未找到预编译生成器或 generate_codex_data.go",
         ));
     }
-    let status = Command::new("go")
+    let status = hidden_command("go")
         .current_dir(&config.root)
         .args([
             "run",
@@ -280,19 +353,14 @@ fn handle_connection(mut stream: TcpStream, state: AppState) {
     };
     let mut parts = request_line.split_whitespace();
     let method = parts.next().unwrap_or("");
-    let target = parts.next().unwrap_or("/");
-    if method != "GET" {
-        write_response(
-            &mut stream,
-            "405 Method Not Allowed",
-            "text/plain; charset=utf-8",
-            b"GET only",
-        );
-        return;
-    }
+    let raw_target = parts.next().unwrap_or("/");
+    let raw_target = raw_target.split('?').next().unwrap_or("/");
 
-    let target = target.split('?').next().unwrap_or("/");
-    if target == "/health" {
+    if raw_target == "/health" {
+        if method != "GET" {
+            write_method_not_allowed(&mut stream, "GET");
+            return;
+        }
         let body = health_response(&state.configuration_signature);
         write_response(
             &mut stream,
@@ -302,12 +370,16 @@ fn handle_connection(mut stream: TcpStream, state: AppState) {
         );
         return;
     }
-    if target == "/" {
+    if raw_target == "/" {
+        if method != "GET" {
+            write_method_not_allowed(&mut stream, "GET");
+            return;
+        }
         write_redirect(&mut stream, &format!("/{}/", state.access_token));
         return;
     }
 
-    let target = percent_decode(target).unwrap_or_else(|| "/".to_owned());
+    let target = percent_decode(raw_target).unwrap_or_else(|| "/".to_owned());
     let Some(relative) = private_route(&target, &state.access_token) else {
         write_response(
             &mut stream,
@@ -317,6 +389,21 @@ fn handle_connection(mut stream: TcpStream, state: AppState) {
         );
         return;
     };
+    if is_shutdown_request(method, relative) {
+        write_response(
+            &mut stream,
+            "202 Accepted",
+            "application/json; charset=utf-8",
+            b"{\"state\":\"stopping\"}",
+        );
+        let _ = stream.flush();
+        state.shutdown.store(true, Ordering::SeqCst);
+        return;
+    }
+    if method != "GET" {
+        write_method_not_allowed(&mut stream, "GET, POST");
+        return;
+    }
     if relative == "events" {
         serve_events(stream, state.clients);
         return;
@@ -416,17 +503,87 @@ fn write_response(stream: &mut TcpStream, status: &str, mime: &str, body: &[u8])
     );
     let _ = stream.write_all(header.as_bytes());
     let _ = stream.write_all(body);
+    let _ = stream.flush();
+}
+
+fn write_method_not_allowed(stream: &mut TcpStream, allowed: &str) {
+    let body = b"method not allowed";
+    let header = format!(
+        "HTTP/1.1 405 Method Not Allowed\r\nAllow: {allowed}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\n{}Connection: close\r\n\r\n",
+        body.len(),
+        security_headers()
+    );
+    let _ = stream.write_all(header.as_bytes());
+    let _ = stream.write_all(body);
+    let _ = stream.flush();
 }
 
 fn write_redirect(stream: &mut TcpStream, location: &str) {
     let body = b"CodexScope-Live";
     let header = format!(
         "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\n{}Connection: close\r\n\r\n",
-        body.len()
-        , security_headers()
+        body.len(),
+        security_headers()
     );
     let _ = stream.write_all(header.as_bytes());
     let _ = stream.write_all(body);
+    let _ = stream.flush();
+}
+
+fn log_message(log_path: &Path, message: &str) {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_secs();
+    if let Some(parent) = log_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) {
+        let _ = writeln!(file, "[{timestamp}] {message}");
+    }
+}
+
+fn fatal_error(log_path: &Path, message: String) -> ! {
+    log_message(log_path, &message);
+    show_error(&message);
+    std::process::exit(1);
+}
+
+#[cfg(target_os = "windows")]
+fn show_error(message: &str) {
+    use std::ffi::{c_void, OsStr};
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn MessageBoxW(
+            window: *mut c_void,
+            text: *const u16,
+            caption: *const u16,
+            kind: u32,
+        ) -> i32;
+    }
+
+    const MB_OK: u32 = 0;
+    const MB_ICONERROR: u32 = 0x10;
+    let text: Vec<u16> = OsStr::new(message).encode_wide().chain(Some(0)).collect();
+    let caption: Vec<u16> = OsStr::new("CodexScope-Live")
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            text.as_ptr(),
+            caption.as_ptr(),
+            MB_OK | MB_ICONERROR,
+        );
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn show_error(message: &str) {
+    eprintln!("{message}");
 }
 
 fn percent_decode(value: &str) -> Option<String> {
