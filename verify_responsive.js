@@ -119,7 +119,7 @@ function isVisibleInViewport(rect, height) {
             .map((el) => el.textContent.trim())
             .filter(Boolean).length,
           encodedValues: Array.from(document.querySelectorAll("#distributionChart .dist-bar"))
-            .filter((el) => (el.getAttribute("title") || "").trim() && (el.getAttribute("aria-label") || "").trim())
+            .filter((el) => (el.getAttribute("data-chart-index") || "").trim() && (el.getAttribute("aria-label") || "").trim())
             .length,
         },
         costState: {

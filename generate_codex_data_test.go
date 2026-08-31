@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -411,5 +412,214 @@ func TestMergeSessionFileDeduplicatesRepeatedSnapshots(t *testing.T) {
 	}
 	if loaded.Sessions[0].Calls != 1 || loaded.Sessions[0].Usage.Total != 1050 {
 		t.Fatalf("unexpected session totals: calls=%d total=%d", loaded.Sessions[0].Calls, loaded.Sessions[0].Usage.Total)
+	}
+}
+
+func TestParseSessionFileKeepsTurnMetadataForUsageAndCompletion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mixed.jsonl")
+	fixture := strings.Join([]string{
+		`{"type":"session_meta","payload":{"id":"sid-mixed"}}`,
+		`{"type":"turn_context","payload":{"turn_id":"turn-sol","model":"gpt-5.6-sol","effort":"high"}}`,
+		`{"timestamp":"2026-05-09T10:00:00Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":3,"reasoning_output_tokens":1,"total_tokens":14}}}}`,
+		`{"timestamp":"2026-05-09T10:00:01Z","payload":{"type":"task_complete","duration_ms":1200,"time_to_first_token_ms":300}}`,
+		`{"type":"turn_context","payload":{"turn_id":"turn-terra","model":"gpt-5.6-terra","effort":"low"}}`,
+		`{"timestamp":"2026-05-09T10:01:00Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":20,"cached_input_tokens":4,"output_tokens":5,"reasoning_output_tokens":2,"total_tokens":27}}}}`,
+		`{"timestamp":"2026-05-09T10:01:01Z","payload":{"type":"task_complete","duration_ms":2200,"time_to_first_token_ms":500}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(fixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	parsed := parseSessionFile(path, time.Time{})
+	if len(parsed.UsageEvents) != 2 || parsed.UsageEvents[0].TurnID != "turn-sol" || parsed.UsageEvents[1].TurnID != "turn-terra" {
+		t.Fatalf("usage events should preserve turn ids, got %#v", parsed.UsageEvents)
+	}
+	if parsed.UsageEvents[0].Effort != "high" || parsed.UsageEvents[1].Effort != "low" {
+		t.Fatalf("usage events should preserve effort, got %#v", parsed.UsageEvents)
+	}
+	if len(parsed.CompletionEvents) != 2 || parsed.CompletionEvents[0].TurnID != "turn-sol" || parsed.CompletionEvents[1].TurnID != "turn-terra" {
+		t.Fatalf("completion events should preserve turn ids, got %#v", parsed.CompletionEvents)
+	}
+	if parsed.CompletionEvents[0].Effort != "high" || parsed.CompletionEvents[1].Effort != "low" {
+		t.Fatalf("completion events should preserve effort, got %#v", parsed.CompletionEvents)
+	}
+}
+
+func TestParseSessionFileClearsMissingEffortOnNewTurn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing-effort.jsonl")
+	fixture := strings.Join([]string{
+		`{"type":"session_meta","payload":{"id":"sid-missing-effort"}}`,
+		`{"type":"turn_context","payload":{"turn_id":"turn-high","model":"gpt-5.6-sol","effort":"high"}}`,
+		`{"timestamp":"2026-05-09T10:00:00Z","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":10}}}}`,
+		`{"type":"turn_context","payload":{"turn_id":"turn-unspecified","model":"gpt-5.6-terra"}}`,
+		`{"timestamp":"2026-05-09T10:01:00Z","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":20}}}}`,
+		`{"timestamp":"2026-05-09T10:01:01Z","payload":{"type":"task_complete","duration_ms":200,"time_to_first_token_ms":50}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(fixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	parsed := parseSessionFile(path, time.Time{})
+	if len(parsed.UsageEvents) != 2 {
+		t.Fatalf("expected two usage events, got %#v", parsed.UsageEvents)
+	}
+	if parsed.UsageEvents[0].Effort != "high" {
+		t.Fatalf("first turn should keep explicit effort, got %#v", parsed.UsageEvents[0])
+	}
+	if parsed.UsageEvents[1].TurnID != "turn-unspecified" || parsed.UsageEvents[1].Model != "gpt-5.6-terra" || parsed.UsageEvents[1].Effort != "" {
+		t.Fatalf("new turn without effort must not inherit the previous turn, got %#v", parsed.UsageEvents[1])
+	}
+	if len(parsed.CompletionEvents) != 1 || parsed.CompletionEvents[0].Effort != "" {
+		t.Fatalf("completion without explicit effort must stay unspecified, got %#v", parsed.CompletionEvents)
+	}
+}
+
+func TestBuildViewSeparatesMixedModelAndEffortSession(t *testing.T) {
+	start := time.Date(2026, 5, 9, 10, 0, 0, 0, time.UTC)
+	end := start.Add(10 * time.Minute)
+	loaded := LoadedData{
+		Events: []RuntimeEvent{
+			{Ts: start.Add(time.Minute), Sid: "sid-mixed", Model: "gpt-5.6-sol", Effort: "high", TurnID: "turn-sol", Usage: Usage{Total: 10}},
+			{Ts: start.Add(2 * time.Minute), Sid: "sid-mixed", Model: "gpt-5.6-terra", Effort: "low", TurnID: "turn-terra", Usage: Usage{Total: 30}},
+		},
+		CompletionEvents: []RuntimeCompletionEvent{
+			{Ts: start.Add(time.Minute), Sid: "sid-mixed", Model: "gpt-5.6-sol", Effort: "high", TurnID: "turn-sol", DurationMs: 1200, TTFBMs: 300},
+			{Ts: start.Add(2 * time.Minute), Sid: "sid-mixed", Model: "gpt-5.6-terra", Effort: "low", TurnID: "turn-terra", DurationMs: 2200, TTFBMs: 500},
+		},
+	}
+
+	view := buildView("custom", "test", start, end, loaded, map[string]map[string]string{
+		"sid-mixed": {"name": "mixed", "model": "gpt-5.6-sol"},
+	}, nil)
+	sessions := view["sessions"].([]map[string]any)
+	if len(sessions) != 1 {
+		t.Fatalf("expected one mixed session, got %#v", sessions)
+	}
+	session := sessions[0]
+	if session["id"] != "sid-mixed" {
+		t.Fatalf("session view must expose a stable local id for refresh-safe interaction state, got %#v", session)
+	}
+	if session["latestModel"] != "gpt-5.6-terra" || session["model"] != "gpt-5.6-terra" {
+		t.Fatalf("session should show latest usage model, got %#v", session)
+	}
+	if len(session["modelBreakdown"].([]map[string]any)) != 2 || len(session["effortBreakdown"].([]map[string]any)) != 2 {
+		t.Fatalf("session should expose model and effort breakdowns, got %#v", session)
+	}
+	if session["ttfbMedianMs"] != int64(400) || session["ttfbP90Ms"] != int64(500) || session["durationMedianMs"] != int64(1700) || session["durationP90Ms"] != int64(2200) {
+		t.Fatalf("session latency percentiles should be exact, got %#v", session)
+	}
+}
+
+func TestLoadCacheRejectsPreviousSchemaVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.json")
+	body := `{"version":` + fmt.Sprint(cacheVersion-1) + `,"windowDays":30,"files":{}}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadCache(path, 30); got != nil {
+		t.Fatalf("cache from previous schema version must be invalidated, got %#v", got)
+	}
+}
+
+func TestParseSessionFileAppendKeepsCurrentTurnMetadata(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "append.jsonl")
+	prefix := strings.Join([]string{
+		`{"type":"session_meta","payload":{"id":"sid-append"}}`,
+		`{"type":"turn_context","payload":{"turn_id":"turn-sol","model":"gpt-5.6-sol","effort":"high"}}`,
+		`{"timestamp":"2026-05-09T10:00:00Z","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":10}}}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(prefix), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cached := parseSessionFile(path, time.Time{})
+	offset := int64(len(prefix))
+	suffix := strings.Join([]string{
+		`{"timestamp":"2026-05-09T10:01:00Z","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":20}}}}`,
+		`{"timestamp":"2026-05-09T10:01:01Z","payload":{"type":"task_complete","duration_ms":200,"time_to_first_token_ms":50}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, append([]byte(prefix), []byte(suffix)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	parsed := parseSessionFileAppend(path, time.Time{}, cached, offset)
+	if len(parsed.UsageEvents) != 2 || parsed.UsageEvents[1].Model != "gpt-5.6-sol" || parsed.UsageEvents[1].Effort != "high" || parsed.UsageEvents[1].TurnID != "turn-sol" {
+		t.Fatalf("append parse should retain current turn metadata, got %#v", parsed.UsageEvents)
+	}
+	if len(parsed.CompletionEvents) != 1 || parsed.CompletionEvents[0].Effort != "high" {
+		t.Fatalf("append completion should retain current turn metadata, got %#v", parsed.CompletionEvents)
+	}
+}
+
+func TestBuildPayloadAppendsMetadataWithoutMovingLegacyRecordFields(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "session.jsonl")
+	fixture := strings.Join([]string{
+		`{"type":"session_meta","payload":{"id":"sid-layout"}}`,
+		`{"type":"turn_context","payload":{"turn_id":"turn-layout","model":"gpt-test","effort":"medium"}}`,
+		`{"timestamp":"2026-05-09T10:00:00Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":1,"cached_input_tokens":2,"output_tokens":3,"reasoning_output_tokens":4,"total_tokens":5}}}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(fixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	payload := buildPayload(root, 0, "", nil)
+	records := payload["recordsV2"].([][]any)
+	if len(records) != 1 || len(records[0]) != 10 {
+		t.Fatalf("usage records should keep 8 legacy fields and append 2 metadata fields, got %#v", records)
+	}
+	for index, want := range []any{int64(1), int64(2), int64(3), int64(4), int64(5)} {
+		if records[0][index+3] != want {
+			t.Fatalf("legacy usage field %d moved or changed: got %#v", index+3, records[0])
+		}
+	}
+	if _, ok := payload["turnCatalog"]; ok {
+		t.Fatal("turn catalog belongs under catalog to preserve the public top-level contract")
+	}
+	catalog := payload["catalog"].(map[string]any)
+	if len(catalog["turns"].([]string)) != 1 || len(catalog["efforts"].([]string)) != 1 {
+		t.Fatalf("metadata catalogs should be compact and present, got %#v", catalog)
+	}
+}
+
+func TestBuildPayloadExportsCompletionRecordsForCustomRanges(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "mixed-completions.jsonl")
+	fixture := strings.Join([]string{
+		"{\"type\":\"session_meta\",\"payload\":{\"id\":\"sid-completions\"}}",
+		"{\"type\":\"turn_context\",\"payload\":{\"turn_id\":\"turn-sol\",\"model\":\"gpt-5.6-sol\",\"effort\":\"high\"}}",
+		"{\"timestamp\":\"2026-05-09T10:00:00Z\",\"payload\":{\"type\":\"token_count\",\"info\":{\"last_token_usage\":{\"total_tokens\":10}}}}",
+		"{\"timestamp\":\"2026-05-09T10:00:01Z\",\"payload\":{\"type\":\"task_complete\",\"duration_ms\":1200,\"time_to_first_token_ms\":300}}",
+		"{\"type\":\"turn_context\",\"payload\":{\"turn_id\":\"turn-terra\",\"model\":\"gpt-5.6-terra\",\"effort\":\"low\"}}",
+		"{\"timestamp\":\"2026-05-09T10:01:00Z\",\"payload\":{\"type\":\"token_count\",\"info\":{\"last_token_usage\":{\"total_tokens\":20}}}}",
+		"{\"timestamp\":\"2026-05-09T10:01:01Z\",\"payload\":{\"type\":\"task_complete\",\"duration_ms\":2200,\"time_to_first_token_ms\":500}}",
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(fixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	payload := buildPayload(root, 0, "", nil)
+	records := payload["recordsV2"].([][]any)
+	if len(records) != 2 || len(records[0]) != 10 {
+		t.Fatalf("usage records must keep legacy fields and append metadata, got %#v", records)
+	}
+	completions, ok := payload["completionRecordsV2"].([][]any)
+	if !ok || len(completions) != 2 || len(completions[0]) != 7 {
+		t.Fatalf("completion records must use the compact seven-field layout, got %#v", payload["completionRecordsV2"])
+	}
+	catalog := payload["catalog"].(map[string]any)
+	models := catalog["models"].([]string)
+	turns := catalog["turns"].([]string)
+	efforts := catalog["efforts"].([]string)
+	first := completions[0]
+	second := completions[1]
+	if models[first[2].(int)] != "gpt-5.6-sol" || turns[first[5].(int)] != "turn-sol" || efforts[first[6].(int)] != "high" {
+		t.Fatalf("first completion metadata cannot be decoded, got %#v with %#v", first, catalog)
+	}
+	if first[3] != int64(1200) || first[4] != int64(300) {
+		t.Fatalf("first completion latency changed, got %#v", first)
+	}
+	if models[second[2].(int)] != "gpt-5.6-terra" || turns[second[5].(int)] != "turn-terra" || efforts[second[6].(int)] != "low" {
+		t.Fatalf("second completion metadata cannot be decoded, got %#v with %#v", second, catalog)
+	}
+	if second[3] != int64(2200) || second[4] != int64(500) {
+		t.Fatalf("second completion latency changed, got %#v", second)
 	}
 }

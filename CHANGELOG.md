@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.0 - 2026-08-31
+
+- Fixed mixed-model session attribution so the session list shows the latest in-range model and reasoning effort while retaining model and effort usage breakdowns.
+- Added per-session TTFB and whole-turn latency median/P90 metrics from local Codex completion records.
+- Added hover, drag, click-to-pin, keyboard navigation, and accessible details to the dashboard's time-series charts.
+- Added independent line/bar display switching for Token, overview, rate, and cost time-series charts, with pixel-aligned markers and crosshairs.
+- Improved quota-page responsive layout and light/dark theme contrast; refreshed the bilingual release documentation and source launcher checks.
+
 ## v0.3.0 - 2026-08-27
 
 - Switched the Windows release executable to the GUI subsystem so double-click startup no longer leaves a PowerShell or Command Prompt window open.

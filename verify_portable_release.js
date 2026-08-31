@@ -130,7 +130,10 @@ async function startAttackerPage(scriptUrl) {
 }
 
 async function main() {
-  assert.equal(packageMetadata.version, "0.3.0", "friendly startup release must be v0.3.0");
+  const cargoManifest = fs.readFileSync(path.join(repositoryRoot, "live-server", "Cargo.toml"), "utf8");
+  const cargoVersion = /^version\s*=\s*"([^"]+)"/m.exec(cargoManifest)?.[1];
+  assert.match(packageMetadata.version, /^\d+\.\d+\.\d+$/, "package version must use semantic versioning");
+  assert.equal(cargoVersion, packageMetadata.version, "Rust service version must match package version");
   assert.ok(isFile(archivePath), `missing release archive: ${archivePath}`);
   assert.ok(isFile(checksumPath), `missing release checksum: ${checksumPath}`);
 

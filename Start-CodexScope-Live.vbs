@@ -15,14 +15,14 @@ If files.FileExists(packagedExe) Then
 End If
 
 If Not files.FileExists(sourceLauncher) Then
-  MsgBox "启动文件不完整，请重新下载或解压 CodexScope-Live。", vbCritical, "CodexScope-Live"
+  MsgBox "Required launcher files are missing. Download or extract CodexScope-Live again.", vbCritical, "CodexScope-Live"
   WScript.Quit 1
 End If
 
 cargoStatus = shell.Run("cmd.exe /d /c where cargo >nul 2>nul", 0, True)
 If cargoStatus <> 0 And Not files.FileExists(cachedExe) Then
-  MsgBox "当前是源码目录，但没有检测到 Rust/Cargo，也没有可用的缓存程序。" & vbCrLf & vbCrLf & _
-         "普通用户请从 GitHub Releases 下载 Windows x64 免安装 ZIP。", vbInformation, "CodexScope-Live"
+  MsgBox "This is a source checkout, but Rust/Cargo and a cached server executable were not found." & vbCrLf & vbCrLf & _
+         "Download the Windows x64 portable ZIP from GitHub Releases.", vbInformation, "CodexScope-Live"
   WScript.Quit 1
 End If
 

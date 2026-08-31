@@ -4,6 +4,12 @@ const path = require("node:path");
 
 const friendlyLauncherPath = path.join(__dirname, "Start-CodexScope-Live.vbs");
 assert.ok(fs.existsSync(friendlyLauncherPath), "source checkout must include a double-click launcher");
+const friendlyLauncherBytes = fs.readFileSync(friendlyLauncherPath);
+assert.equal(
+  friendlyLauncherBytes.every((byte) => byte <= 0x7f),
+  true,
+  "VBScript launcher must remain ASCII so Windows Script Host never misparses UTF-8 text as ANSI/DBCS",
+);
 const friendlyLauncher = fs.readFileSync(friendlyLauncherPath, "utf8");
 assert.match(friendlyLauncher, /CodexScope-Live\.exe/i, "friendly launcher must prefer the packaged executable");
 assert.match(friendlyLauncher, /windows\\open-dashboard\.cmd/i, "friendly launcher must retain the source fallback");

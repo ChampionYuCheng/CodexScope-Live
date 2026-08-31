@@ -44,11 +44,15 @@ The project has two modes:
 - Request and token distribution charts
 - Quota and risk status from local `rate_limits` events when available
 - Session and model rankings with local search filters
+- Sessions follow the most recently used model and can expand into per-model/per-effort usage plus median/P90 TTFB and full-turn duration
 - Estimated cost by model and token type, with USD and optional CNY display
+- Every time-series chart in the overview, Token, rate, and cost pages can switch independently between line and bar views; hover markers use the chart's real coordinate system and support pointer drag, arrow/Home/End navigation, and Enter-pinned details
 - Live refresh toggle, connection status, and in-place manual or automatic data updates without reloading the page
+- In-place refresh preserves the active tab, expanded session, pinned chart point, theme, and scroll position
 - Startup recovery that waits for the real `data.js` instead of remaining on sample data while the Go generator finishes
 - Six true tab pages for overview, quota, Token analytics, sessions, models and cost, and rate distribution
 - Adaptive first-screen density with a 2-by-2 overview grid and charts and rankings that expand into available vertical space
+- Responsive quota rows use thicker progress tracks and reflow across desktop, tablet, mobile, and browser-zoom layouts
 - A redesigned CodexScope-Live pulse logo with independent light/dark modes, four palettes, and Acrylic, Liquid Glass, Matte, and Translucent surface styles
 - Local custom backgrounds stored in the browser, with adjustable overlay strength and blur; images are never written into the repository or uploaded
 - URL hash navigation with refresh persistence, browser history support, and keyboard arrow/Home/End controls
@@ -59,7 +63,7 @@ The project has two modes:
 
 ### Windows portable live dashboard (recommended)
 
-Regular users should download `CodexScope-Live-v0.3.0-Windows-x64.zip` and its matching `.sha256` file from [GitHub Releases](https://github.com/ChampionYuCheng/CodexScope-Live/releases). Do not use GitHub's automatically generated `Source code` archives.
+Regular users should download `CodexScope-Live-v0.4.0-Windows-x64.zip` and its matching `.sha256` file from [GitHub Releases](https://github.com/ChampionYuCheng/CodexScope-Live/releases). Do not use GitHub's automatically generated `Source code` archives.
 
 1. Extract the entire ZIP.
 2. Double-click `CodexScope-Live.exe`.
@@ -73,8 +77,8 @@ The bookmark-friendly address remains `http://127.0.0.1:48173/`. Each launch red
 Windows SmartScreen may report an unknown publisher because the executable is not commercially code-signed. Confirm that the download came from this repository's Release page and verify it against the matching `.sha256` file before running it:
 
 ~~~powershell
-Get-FileHash .\CodexScope-Live-v0.3.0-Windows-x64.zip -Algorithm SHA256
-Get-Content .\CodexScope-Live-v0.3.0-Windows-x64.zip.sha256
+Get-FileHash .\CodexScope-Live-v0.4.0-Windows-x64.zip -Algorithm SHA256
+Get-Content .\CodexScope-Live-v0.4.0-Windows-x64.zip.sha256
 ~~~
 
 The two hashes must match exactly.
@@ -189,12 +193,12 @@ npm.cmd run release:windows
 npm.cmd run check:release:windows
 ~~~
 
-The artifacts are written to `dist/CodexScope-Live-v0.3.0-Windows-x64.zip` and a matching `.sha256` file. The verifier extracts that final ZIP into a temporary directory, checks both executables are Windows x64, validates the checksum and GUI subsystem, runs a real JSONL fixture through the bundled generator, confirms private runtime data stays outside the app directory, checks that a cross-origin page cannot load `data.js`, and exercises the authenticated shutdown flow. The existing `npm run release:local` command remains available for the legacy cross-platform static-package flow.
+The artifacts are written to `dist/CodexScope-Live-v0.4.0-Windows-x64.zip` and a matching `.sha256` file. The verifier extracts that final ZIP into a temporary directory, checks both executables are Windows x64, validates the checksum and GUI subsystem, runs a real JSONL fixture through the bundled generator, confirms private runtime data stays outside the app directory, checks that a cross-origin page cannot load `data.js`, and exercises the authenticated shutdown flow. The existing `npm run release:local` command remains available for the legacy cross-platform static-package flow.
 
 ## Data flow
 
 1. Codex writes local JSONL session logs under the platform-specific session directory.
-2. `generate_codex_data.go` extracts usage metadata such as token counts, model names, session IDs, timing, failures, and rate-limit metadata.
+2. `generate_codex_data.go` extracts usage metadata such as token counts, model names, session IDs, turn IDs, reasoning effort, TTFB, full-turn duration, failures, and rate-limit metadata.
 3. The live server writes precomputed views to the platform user-data directory (`%LOCALAPPDATA%/CodexScope-Live` on Windows); manual generator runs use the paths supplied on the command line.
 4. The browser loads sample data first, then overrides it with local exports when those files exist.
 5. In live mode, the Rust server detects changed JSONL files, regenerates the export, and notifies the browser through SSE.
@@ -231,6 +235,8 @@ When available, the dashboard retrieves the USD/CNY rate from the Frankfurter AP
 - `verify_source_launcher.js`: regression check that source mode rebuilds current Rust code before using a cached executable
 - `verify_tabs.js`: Playwright regression check for semantic tabs, URL state, refresh, and keyboard navigation
 - `verify_theme.js`: Playwright regression check for branding, theme persistence, keyboard access, and mobile layout
+- `verify_interactions.js`: Playwright regression check for session details, line/bar chart switching, pixel-aligned markers, hover/drag/keyboard control, pinned details, and in-place refresh state
+- `verify_quota_layout.js`: quota-layout audit across four viewport widths and both light/dark modes, including track size, touch rows, reflow, and contrast
 - `assets/`: screenshots and static assets
 
 ## Limitations
@@ -239,6 +245,7 @@ When available, the dashboard retrieves the USD/CNY rate from the Frankfurter AP
 - Live mode requires the Rust server and a usable Go generator or prebuilt generator.
 - Quota and risk information is only available when the local session logs contain the relevant `rate_limits` metadata.
 - Cost values are estimates and should not be treated as billing records.
+- TTFB and full-turn duration come from local `task_complete` events. Full-turn duration can include tools, approvals, and waiting, so it is not presented as exact model-generation tokens per second.
 - The server binds to loopback (`127.0.0.1`) and is intended for local use only.
 - The Windows executables are not code-signed, so SmartScreen can show an unknown-publisher warning.
 

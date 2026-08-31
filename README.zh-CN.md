@@ -44,11 +44,15 @@ CodexScope Live 读取本机 Codex JSONL 会话日志中已经存在的用量元
 - 调用次数和 Token 消耗分布图
 - 从本地 `rate_limits` 事件读取额度与风险状态
 - 会话排行和模型排行，支持本地搜索过滤
+- 会话按最近一次使用的模型归属；可展开查看同一会话内的模型/推理档位分布，以及 TTFB 和整轮耗时的中位数/P90
 - 按模型和 Token 类型估算费用，支持 USD 和 CNY 展示
+- 总览、Token、速率和费用页面中的所有时间序列图均可独立切换折线图/柱状图；悬浮点使用图表真实坐标，并支持鼠标/触控笔拖动、方向键/Home/End 定位及 Enter 固定提示
 - 实时刷新开关、连接状态，以及不重载页面的手动或自动局部数据更新
+- 局部数据刷新会保留当前 Tab、会话展开项、图表固定节点、主题和页面滚动位置
 - 启动阶段自动等待真实 `data.js` 就绪，避免 Go 生成尚未完成时长期停留在示例数据
 - 总览、额度、Token、会话、模型与费用、速率分布 6 个真正的 Tab 页面
 - Tab 内容自适应填满首屏：总览使用 2×2 指标卡，图表和排行按可用高度扩展，减少大面积无效留白
+- 额度页使用响应式粗轨道和可触控行，在桌面、平板、移动端及浏览器缩放场景下自动重排
 - 全新的 CodexScope-Live 脉冲 Logo，以及相互独立的浅色/深色模式、四套调色板和亚克力、液态玻璃、哑光、半透明四种材质风格
 - 支持仅保存在浏览器本地的自定义背景图，可调整遮罩强度和模糊程度；图片不会写入仓库或上传网络
 - 使用 URL 哈希保存当前页面，支持刷新恢复、浏览器前进后退和方向键/Home/End 导航
@@ -59,7 +63,7 @@ CodexScope Live 读取本机 Codex JSONL 会话日志中已经存在的用量元
 
 ### Windows 免安装实时面板（推荐）
 
-普通用户请从 [GitHub Releases](https://github.com/ChampionYuCheng/CodexScope-Live/releases) 下载 `CodexScope-Live-v0.3.0-Windows-x64.zip` 及其同名 `.sha256` 文件，不要下载 GitHub 自动生成的 `Source code` 压缩包。
+普通用户请从 [GitHub Releases](https://github.com/ChampionYuCheng/CodexScope-Live/releases) 下载 `CodexScope-Live-v0.4.0-Windows-x64.zip` 及其同名 `.sha256` 文件，不要下载 GitHub 自动生成的 `Source code` 压缩包。
 
 1. 解压整个 ZIP。
 2. 双击 `CodexScope-Live.exe`。
@@ -73,8 +77,8 @@ CodexScope Live 读取本机 Codex JSONL 会话日志中已经存在的用量元
 Windows SmartScreen 可能因为程序暂未进行代码签名而显示“未知发布者”。请确认下载地址是本仓库的 Release，并在运行前核对 SHA256：
 
 ~~~powershell
-Get-FileHash .\CodexScope-Live-v0.3.0-Windows-x64.zip -Algorithm SHA256
-Get-Content .\CodexScope-Live-v0.3.0-Windows-x64.zip.sha256
+Get-FileHash .\CodexScope-Live-v0.4.0-Windows-x64.zip -Algorithm SHA256
+Get-Content .\CodexScope-Live-v0.4.0-Windows-x64.zip.sha256
 ~~~
 
 两处哈希值必须完全一致。
@@ -189,12 +193,12 @@ npm.cmd run release:windows
 npm.cmd run check:release:windows
 ~~~
 
-产物位于 `dist/CodexScope-Live-v0.3.0-Windows-x64.zip`，同时生成同名 `.sha256` 校验文件。验证脚本会先把最终 ZIP 解压到临时目录，再检查两个 EXE 都是 Windows x64、主程序采用 GUI 子系统、校验 SHA256、让包内生成器解析一份真实 JSONL 测试数据、确认私有运行数据没有写入程序目录、验证跨域网页无法加载 `data.js`，并实际测试带私有令牌的退出流程。原有 `npm run release:local` 继续保留给旧的跨平台静态包流程。
+产物位于 `dist/CodexScope-Live-v0.4.0-Windows-x64.zip`，同时生成同名 `.sha256` 校验文件。验证脚本会先把最终 ZIP 解压到临时目录，再检查两个 EXE 都是 Windows x64、主程序采用 GUI 子系统、校验 SHA256、让包内生成器解析一份真实 JSONL 测试数据、确认私有运行数据没有写入程序目录、验证跨域网页无法加载 `data.js`，并实际测试带私有令牌的退出流程。原有 `npm run release:local` 继续保留给旧的跨平台静态包流程。
 
 ## 数据流
 
 1. Codex 把本机会话日志写入对应平台的会话目录。
-2. `generate_codex_data.go` 提取 Token 数量、模型名、会话 ID、耗时、失败状态和 rate-limit 元数据等用量信息。
+2. `generate_codex_data.go` 提取 Token 数量、模型名、会话 ID、轮次 ID、推理档位、TTFB、整轮耗时、失败状态和 rate-limit 元数据等用量信息。
 3. 实时服务把预计算视图和原始数据写入平台用户数据目录；Windows 默认为 `%LOCALAPPDATA%/CodexScope-Live`。手动运行生成器时则使用命令行指定的输出路径。
 4. 浏览器先加载示例数据；如果存在本地导出文件，再用真实数据覆盖示例数据。
 5. 实时模式下，Rust 服务检测 JSONL 文件变化，重新生成导出文件，并通过 SSE 通知浏览器。
@@ -231,6 +235,8 @@ npm.cmd run check:release:windows
 - `verify_source_launcher.js`：检查源码模式优先构建当前 Rust 代码、不会直接运行过期缓存 EXE 的回归脚本
 - `verify_tabs.js`：检查语义化 Tab、URL 状态、刷新恢复和键盘导航的 Playwright 回归脚本
 - `verify_theme.js`：检查品牌标识、主题持久化、键盘操作和移动端布局的 Playwright 回归脚本
+- `verify_interactions.js`：检查会话详情、折线/柱状切换、悬浮点像素对齐、拖动/键盘操作、固定提示和局部刷新状态保持
+- `verify_quota_layout.js`：检查额度页在四档宽度及浅色/深色模式下的轨道尺寸、触控行、布局和对比度
 - `assets/`：截图和静态资源
 
 ## 当前限制
@@ -239,6 +245,7 @@ npm.cmd run check:release:windows
 - 实时模式需要 Rust 服务，以及可用的 Go 生成器或预编译生成器。
 - 只有本地会话日志包含相关 `rate_limits` 元数据时，页面才能显示额度和风险信息。
 - 费用数据是估算值，不能当作账单记录。
+- TTFB 和整轮耗时来自本地 `task_complete`；整轮耗时可能包含工具执行、审批和等待，因此不会被标成精确的模型生成 Token/s。
 - 服务只监听回环地址 `127.0.0.1`，设计目标是本机使用。
 - Windows 可执行文件暂未进行代码签名，因此 SmartScreen 可能提示未知发布者。
 

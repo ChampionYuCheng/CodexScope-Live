@@ -18,8 +18,8 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-const cacheVersion = 6
-const minReadableCacheVersion = 4
+const cacheVersion = 7
+const minReadableCacheVersion = 7
 
 // Usage mirrors the token fields emitted by Codex token_count events.
 // Total is kept from the log when present; it is not recomputed from the
@@ -37,6 +37,8 @@ type UsageEvent struct {
 	Sid         string `json:"sid"`
 	Usage       Usage  `json:"usage"`
 	Model       string `json:"model"`
+	TurnID      string `json:"turnId,omitempty"`
+	Effort      string `json:"effort,omitempty"`
 	Snapshot    Usage  `json:"snapshot,omitempty"`
 	HasSnapshot bool   `json:"hasSnapshot,omitempty"`
 }
@@ -45,6 +47,8 @@ type CompletionEvent struct {
 	Ts         string `json:"ts"`
 	Sid        string `json:"sid"`
 	Model      string `json:"model"`
+	TurnID     string `json:"turnId,omitempty"`
+	Effort     string `json:"effort,omitempty"`
 	DurationMs int64  `json:"duration_ms,omitempty"`
 	TTFBMs     int64  `json:"ttfb_ms,omitempty"`
 }
@@ -63,6 +67,8 @@ type ParsedFile struct {
 	File             string            `json:"file,omitempty"`
 	Cwd              string            `json:"cwd,omitempty"`
 	Model            string            `json:"model,omitempty"`
+	CurrentTurnID    string            `json:"currentTurnId,omitempty"`
+	CurrentEffort    string            `json:"currentEffort,omitempty"`
 	UsageEvents      []UsageEvent      `json:"usageEvents,omitempty"`
 	CompletionEvents []CompletionEvent `json:"completionEvents,omitempty"`
 	FailureEvents    []FailureEvent    `json:"failureEvents,omitempty"`
@@ -101,10 +107,24 @@ type SessionStats struct {
 }
 
 type RuntimeEvent struct {
-	Ts    time.Time
-	Sid   string
-	Usage Usage
-	Model string
+	Ts     time.Time
+	Sid    string
+	Usage  Usage
+	Model  string
+	TurnID string
+	Effort string
+}
+
+// RuntimeCompletionEvent retains completion latency together with the turn
+// metadata that was active when Codex emitted task_complete.
+type RuntimeCompletionEvent struct {
+	Ts         time.Time
+	Sid        string
+	Model      string
+	TurnID     string
+	Effort     string
+	DurationMs int64
+	TTFBMs     int64
 }
 
 type RuntimeTTFBEvent struct {
@@ -121,11 +141,12 @@ type RuntimeFailureEvent struct {
 }
 
 type LoadedData struct {
-	Sessions      []SessionStats
-	Events        []RuntimeEvent
-	Limits        map[string]any
-	TTFBEvents    []RuntimeTTFBEvent
-	FailureEvents []RuntimeFailureEvent
+	Sessions         []SessionStats
+	Events           []RuntimeEvent
+	Limits           map[string]any
+	CompletionEvents []RuntimeCompletionEvent
+	TTFBEvents       []RuntimeTTFBEvent
+	FailureEvents    []RuntimeFailureEvent
 }
 
 type CostSummary struct {
@@ -139,13 +160,14 @@ type CostSummary struct {
 }
 
 type RawExportPayload struct {
-	SchemaVersion    any `json:"schemaVersion"`
-	RawSchemaVersion int `json:"rawSchemaVersion"`
-	Catalog          any `json:"catalog"`
-	RecordBase       any `json:"recordBase"`
-	RecordsV2        any `json:"recordsV2"`
-	TTFBRecordsV2    any `json:"ttfbRecordsV2"`
-	FailureRecordsV2 any `json:"failureRecordsV2"`
+	SchemaVersion       any `json:"schemaVersion"`
+	RawSchemaVersion    int `json:"rawSchemaVersion"`
+	Catalog             any `json:"catalog"`
+	RecordBase          any `json:"recordBase"`
+	RecordsV2           any `json:"recordsV2"`
+	CompletionRecordsV2 any `json:"completionRecordsV2"`
+	TTFBRecordsV2       any `json:"ttfbRecordsV2"`
+	FailureRecordsV2    any `json:"failureRecordsV2"`
 }
 
 type bucketAccumulator struct {
@@ -491,18 +513,18 @@ func loadCache(cachePath string, days int) map[string]FileCache {
 	// because older files may have been skipped. Older readable cache versions
 	// can still serve unchanged files; they just miss newer append-only metadata.
 	if cachePath == "" {
-		return map[string]FileCache{}
+		return nil
 	}
 	body, err := os.ReadFile(cachePath)
 	if err != nil {
-		return map[string]FileCache{}
+		return nil
 	}
 	var payload CachePayload
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return map[string]FileCache{}
+		return nil
 	}
 	if payload.Version < minReadableCacheVersion || payload.Version > cacheVersion || !cacheCoversDays(payload.WindowDays, days) || payload.Files == nil {
-		return map[string]FileCache{}
+		return nil
 	}
 	return payload.Files
 }
@@ -731,8 +753,17 @@ func parseSessionFileFrom(path string, cutoff time.Time, parsed ParsedFile, offs
 					parsed.Cwd = cwd
 				}
 			case topType == "turn_context":
+				// effort is optional per turn. Clear the previous turn's value
+				// before reading the new context so an omitted field stays unknown.
+				parsed.CurrentEffort = ""
 				if model := obj.Get("payload.model").String(); model != "" {
 					parsed.Model = model
+				}
+				if turnID := obj.Get("payload.turn_id").String(); turnID != "" {
+					parsed.CurrentTurnID = turnID
+				}
+				if effort := obj.Get("payload.effort").String(); effort != "" {
+					parsed.CurrentEffort = effort
 				}
 				if cwd := obj.Get("payload.cwd").String(); cwd != "" {
 					parsed.Cwd = cwd
@@ -777,7 +808,14 @@ func parseSessionFileFrom(path string, cutoff time.Time, parsed ParsedFile, offs
 						usage, hasUsage = lastUsage, true
 					}
 					if hasUsage {
-						event := UsageEvent{Ts: isoTime(ts, true), Sid: parsed.Sid, Usage: usage, Model: parsed.Model}
+						event := UsageEvent{
+							Ts:     isoTime(ts, true),
+							Sid:    parsed.Sid,
+							Usage:  usage,
+							Model:  parsed.Model,
+							TurnID: parsed.CurrentTurnID,
+							Effort: parsed.CurrentEffort,
+						}
 						if hasTotal {
 							event.Snapshot = totalUsage
 							event.HasSnapshot = true
@@ -788,7 +826,13 @@ func parseSessionFileFrom(path string, cutoff time.Time, parsed ParsedFile, offs
 			case payloadType == "task_complete":
 				ts, hasTs := parseTime(obj.Get("timestamp").String())
 				if hasTs && !ts.Before(cutoff) {
-					event := CompletionEvent{Ts: isoTime(ts, true), Sid: parsed.Sid, Model: parsed.Model}
+					event := CompletionEvent{
+						Ts:     isoTime(ts, true),
+						Sid:    parsed.Sid,
+						Model:  parsed.Model,
+						TurnID: parsed.CurrentTurnID,
+						Effort: parsed.CurrentEffort,
+					}
 					if duration := obj.Get("payload.duration_ms"); duration.Exists() {
 						event.DurationMs = duration.Int()
 					}
@@ -859,7 +903,14 @@ func mergeSessionFile(parsed ParsedFile, cutoff time.Time, loaded *LoadedData, l
 		markSeen(&stat, ts)
 		addUsage(&stat.Usage, event.Usage)
 		stat.Calls++
-		loaded.Events = append(loaded.Events, RuntimeEvent{Ts: ts, Sid: eventSid, Usage: event.Usage, Model: eventModel})
+		loaded.Events = append(loaded.Events, RuntimeEvent{
+			Ts:     ts,
+			Sid:    eventSid,
+			Usage:  event.Usage,
+			Model:  eventModel,
+			TurnID: event.TurnID,
+			Effort: event.Effort,
+		})
 	}
 
 	for _, event := range parsed.CompletionEvents {
@@ -870,17 +921,26 @@ func mergeSessionFile(parsed ParsedFile, cutoff time.Time, loaded *LoadedData, l
 		markSeen(&stat, ts)
 		stat.Completions++
 		stat.DurationMs += event.DurationMs
+		eventSid := event.Sid
+		if eventSid == "" {
+			eventSid = sid
+		}
+		eventModel := event.Model
+		if eventModel == "" {
+			eventModel = model
+		}
+		loaded.CompletionEvents = append(loaded.CompletionEvents, RuntimeCompletionEvent{
+			Ts:         ts,
+			Sid:        eventSid,
+			Model:      eventModel,
+			TurnID:     event.TurnID,
+			Effort:     event.Effort,
+			DurationMs: event.DurationMs,
+			TTFBMs:     event.TTFBMs,
+		})
 		if event.TTFBMs > 0 {
 			stat.TTFBMs += event.TTFBMs
 			stat.TTFBCount++
-			eventSid := event.Sid
-			if eventSid == "" {
-				eventSid = sid
-			}
-			eventModel := event.Model
-			if eventModel == "" {
-				eventModel = model
-			}
 			loaded.TTFBEvents = append(loaded.TTFBEvents, RuntimeTTFBEvent{Ts: ts, Sid: eventSid, Model: eventModel, TTFBMs: event.TTFBMs})
 		}
 	}
@@ -1012,6 +1072,7 @@ func loadSessions(root string, cutoff time.Time, cachePath string, days int, cac
 	}
 	loaded.Sessions = make([]SessionStats, 0, len(parsedFiles))
 	loaded.Events = make([]RuntimeEvent, 0, usageEventCount)
+	loaded.CompletionEvents = make([]RuntimeCompletionEvent, 0, ttfbEventCount)
 	loaded.TTFBEvents = make([]RuntimeTTFBEvent, 0, ttfbEventCount)
 	loaded.FailureEvents = make([]RuntimeFailureEvent, 0, failureEventCount)
 	seenUsageEvents := make(map[string]struct{}, usageEventCount)
@@ -1377,6 +1438,12 @@ func runtimeEventsInRange(events []RuntimeEvent, start, end time.Time) []Runtime
 	})
 }
 
+func runtimeCompletionsInRange(events []RuntimeCompletionEvent, start, end time.Time) []RuntimeCompletionEvent {
+	return runtimeItemsInRange(events, start, end, func(event RuntimeCompletionEvent) time.Time {
+		return event.Ts
+	})
+}
+
 func runtimeFailuresInRange(events []RuntimeFailureEvent, start, end time.Time) []RuntimeFailureEvent {
 	return runtimeItemsInRange(events, start, end, func(event RuntimeFailureEvent) time.Time {
 		return event.Ts
@@ -1408,6 +1475,9 @@ func loadedDataBounds(loaded LoadedData, fallback time.Time) (time.Time, time.Ti
 	for _, event := range loaded.Events {
 		visit(event.Ts)
 	}
+	for _, event := range loaded.CompletionEvents {
+		visit(event.Ts)
+	}
 	for _, event := range loaded.TTFBEvents {
 		visit(event.Ts)
 	}
@@ -1417,13 +1487,54 @@ func loadedDataBounds(loaded LoadedData, fallback time.Time) (time.Time, time.Ti
 	return start, end, hasData
 }
 
+func medianMillis(values []int64) int64 {
+	if len(values) == 0 {
+		return 0
+	}
+	sorted := append([]int64(nil), values...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	middle := len(sorted) / 2
+	if len(sorted)%2 == 1 {
+		return sorted[middle]
+	}
+	return (sorted[middle-1] + sorted[middle]) / 2
+}
+
+func percentileMillis(values []int64, percentile float64) int64 {
+	if len(values) == 0 {
+		return 0
+	}
+	sorted := append([]int64(nil), values...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	rank := int(math.Ceil(percentile*float64(len(sorted)))) - 1
+	if rank < 0 {
+		rank = 0
+	}
+	if rank >= len(sorted) {
+		rank = len(sorted) - 1
+	}
+	return sorted[rank]
+}
+
 func buildView(key, label string, start, end time.Time, loaded LoadedData, sessionCatalog map[string]map[string]string, limits map[string]any) map[string]any {
-	type sessionRow struct {
+	type dimensionRow struct {
 		name     string
-		model    string
 		tokens   int64
 		requests int64
-		status   string
+	}
+	type sessionRow struct {
+		id              string
+		name            string
+		model           string
+		latestEffort    string
+		latestAt        time.Time
+		tokens          int64
+		requests        int64
+		status          string
+		modelBreakdown  map[string]*dimensionRow
+		effortBreakdown map[string]*dimensionRow
+		ttfbValues      []int64
+		durationValues  []int64
 	}
 	type modelRow struct {
 		name         string
@@ -1466,11 +1577,38 @@ func buildView(key, label string, start, end time.Time, loaded LoadedData, sessi
 		}
 		session := bySession[event.Sid]
 		if session == nil {
-			session = &sessionRow{name: name, model: model, status: "ok"}
+			session = &sessionRow{
+				id:              event.Sid,
+				name:            name,
+				model:           model,
+				status:          "ok",
+				modelBreakdown:  map[string]*dimensionRow{},
+				effortBreakdown: map[string]*dimensionRow{},
+			}
 			bySession[event.Sid] = session
+		}
+		if session.latestAt.IsZero() || !event.Ts.Before(session.latestAt) {
+			session.latestAt = event.Ts
+			session.model = model
+			session.latestEffort = nonEmpty(event.Effort, "unknown")
 		}
 		session.tokens += event.Usage.Total
 		session.requests++
+		modelPart := session.modelBreakdown[model]
+		if modelPart == nil {
+			modelPart = &dimensionRow{name: model}
+			session.modelBreakdown[model] = modelPart
+		}
+		modelPart.tokens += event.Usage.Total
+		modelPart.requests++
+		effort := nonEmpty(event.Effort, "unknown")
+		effortPart := session.effortBreakdown[effort]
+		if effortPart == nil {
+			effortPart = &dimensionRow{name: effort}
+			session.effortBreakdown[effort] = effortPart
+		}
+		effortPart.tokens += event.Usage.Total
+		effortPart.requests++
 
 		row := byModel[model]
 		if row == nil {
@@ -1481,6 +1619,19 @@ func buildView(key, label string, start, end time.Time, loaded LoadedData, sessi
 		row.tokens += event.Usage.Total
 		row.requests++
 		row.cost += cost.Total
+	}
+
+	for _, event := range runtimeCompletionsInRange(loaded.CompletionEvents, start, end) {
+		session := bySession[event.Sid]
+		if session == nil {
+			continue
+		}
+		if event.TTFBMs > 0 {
+			session.ttfbValues = append(session.ttfbValues, event.TTFBMs)
+		}
+		if event.DurationMs > 0 {
+			session.durationValues = append(session.durationValues, event.DurationMs)
+		}
 	}
 
 	failureCount := 0
@@ -1529,16 +1680,61 @@ func buildView(key, label string, start, end time.Time, loaded LoadedData, sessi
 	}
 	sessionOut := make([]map[string]any, 0, len(sessionRows))
 	for index, row := range sessionRows {
+		modelBreakdown := make([]*dimensionRow, 0, len(row.modelBreakdown))
+		for _, part := range row.modelBreakdown {
+			modelBreakdown = append(modelBreakdown, part)
+		}
+		sort.Slice(modelBreakdown, func(i, j int) bool {
+			if modelBreakdown[i].tokens == modelBreakdown[j].tokens {
+				return modelBreakdown[i].name < modelBreakdown[j].name
+			}
+			return modelBreakdown[i].tokens > modelBreakdown[j].tokens
+		})
+		modelBreakdownOut := make([]map[string]any, 0, len(modelBreakdown))
+		for _, part := range modelBreakdown {
+			modelBreakdownOut = append(modelBreakdownOut, map[string]any{
+				"model":    part.name,
+				"tokens":   part.tokens,
+				"requests": part.requests,
+			})
+		}
+		effortBreakdown := make([]*dimensionRow, 0, len(row.effortBreakdown))
+		for _, part := range row.effortBreakdown {
+			effortBreakdown = append(effortBreakdown, part)
+		}
+		sort.Slice(effortBreakdown, func(i, j int) bool {
+			if effortBreakdown[i].tokens == effortBreakdown[j].tokens {
+				return effortBreakdown[i].name < effortBreakdown[j].name
+			}
+			return effortBreakdown[i].tokens > effortBreakdown[j].tokens
+		})
+		effortBreakdownOut := make([]map[string]any, 0, len(effortBreakdown))
+		for _, part := range effortBreakdown {
+			effortBreakdownOut = append(effortBreakdownOut, map[string]any{
+				"effort":   part.name,
+				"tokens":   part.tokens,
+				"requests": part.requests,
+			})
+		}
 		sessionOut = append(sessionOut, map[string]any{
-			"rank":           index + 1,
-			"name":           row.name,
-			"model":          row.model,
-			"tokens":         row.tokens,
-			"tokensLabel":    fmtInt(row.tokens),
-			"requests":       row.requests,
-			"tokenPercent":   int(math.Round(float64(row.tokens) / float64(maxSessionTokens) * 100)),
-			"requestPercent": int(math.Round(float64(row.requests) / float64(maxSessionRequests) * 100)),
-			"status":         row.status,
+			"id":               row.id,
+			"rank":             index + 1,
+			"name":             row.name,
+			"model":            row.model,
+			"latestModel":      row.model,
+			"latestEffort":     row.latestEffort,
+			"modelBreakdown":   modelBreakdownOut,
+			"effortBreakdown":  effortBreakdownOut,
+			"ttfbMedianMs":     medianMillis(row.ttfbValues),
+			"ttfbP90Ms":        percentileMillis(row.ttfbValues, 0.9),
+			"durationMedianMs": medianMillis(row.durationValues),
+			"durationP90Ms":    percentileMillis(row.durationValues, 0.9),
+			"tokens":           row.tokens,
+			"tokensLabel":      fmtInt(row.tokens),
+			"requests":         row.requests,
+			"tokenPercent":     int(math.Round(float64(row.tokens) / float64(maxSessionTokens) * 100)),
+			"requestPercent":   int(math.Round(float64(row.requests) / float64(maxSessionRequests) * 100)),
+			"status":           row.status,
 		})
 	}
 
@@ -1665,6 +1861,7 @@ func buildPayload(root string, days int, cachePath string, cacheFiles map[string
 	loaded := loadSessions(root, cutoff, cachePath, days, cacheFiles)
 
 	sort.SliceStable(loaded.Events, func(i, j int) bool { return loaded.Events[i].Ts.Before(loaded.Events[j].Ts) })
+	sort.SliceStable(loaded.CompletionEvents, func(i, j int) bool { return loaded.CompletionEvents[i].Ts.Before(loaded.CompletionEvents[j].Ts) })
 	sort.SliceStable(loaded.TTFBEvents, func(i, j int) bool { return loaded.TTFBEvents[i].Ts.Before(loaded.TTFBEvents[j].Ts) })
 	sort.SliceStable(loaded.FailureEvents, func(i, j int) bool { return loaded.FailureEvents[i].Ts.Before(loaded.FailureEvents[j].Ts) })
 
@@ -1717,6 +1914,38 @@ func buildPayload(root string, days int, cachePath string, cacheFiles map[string
 	for _, event := range loaded.FailureEvents {
 		addModel(event.Model)
 	}
+	turnToIndex := map[string]int{}
+	turnCatalog := make([]string, 0)
+	addTurn := func(turnID string) int {
+		turnID = nonEmpty(turnID, "unknown")
+		if index, ok := turnToIndex[turnID]; ok {
+			return index
+		}
+		index := len(turnCatalog)
+		turnToIndex[turnID] = index
+		turnCatalog = append(turnCatalog, turnID)
+		return index
+	}
+	effortToIndex := map[string]int{}
+	effortCatalog := make([]string, 0)
+	addEffort := func(effort string) int {
+		effort = nonEmpty(effort, "unknown")
+		if index, ok := effortToIndex[effort]; ok {
+			return index
+		}
+		index := len(effortCatalog)
+		effortToIndex[effort] = index
+		effortCatalog = append(effortCatalog, effort)
+		return index
+	}
+	for _, event := range loaded.Events {
+		addTurn(event.TurnID)
+		addEffort(event.Effort)
+	}
+	for _, event := range loaded.CompletionEvents {
+		addTurn(event.TurnID)
+		addEffort(event.Effort)
+	}
 
 	dataStart, dataEnd, hasData := loadedDataBounds(loaded, now)
 	recordBase := dataStart.UnixMilli()
@@ -1736,6 +1965,25 @@ func buildPayload(root string, days int, cachePath string, cacheFiles map[string
 			event.Usage.Output,
 			event.Usage.Reasoning,
 			event.Usage.Total,
+			addTurn(event.TurnID),
+			addEffort(event.Effort),
+		})
+	}
+	completionRecordsV2 := make([][]any, 0, len(loaded.CompletionEvents))
+	for _, event := range loaded.CompletionEvents {
+		sid := nonEmpty(event.Sid, "unknown")
+		if _, ok := sidToIndex[sid]; !ok {
+			sidToIndex[sid] = len(sessionCatalogRows)
+			sessionCatalogRows = append(sessionCatalogRows, []any{sid, fmt.Sprintf("session %s", tail(sid, 6)), nonEmpty(event.Model, "unknown")})
+		}
+		completionRecordsV2 = append(completionRecordsV2, []any{
+			event.Ts.UnixMilli() - recordBase,
+			sidToIndex[sid],
+			addModel(event.Model),
+			event.DurationMs,
+			event.TTFBMs,
+			addTurn(event.TurnID),
+			addEffort(event.Effort),
 		})
 	}
 	ttfbRecordsV2 := make([][]any, 0, len(loaded.TTFBEvents))
@@ -1800,12 +2048,15 @@ func buildPayload(root string, days int, cachePath string, cacheFiles map[string
 		"catalog": map[string]any{
 			"sessions": sessionCatalogRows,
 			"models":   modelCatalog,
+			"turns":    turnCatalog,
+			"efforts":  effortCatalog,
 		},
-		"recordBase":       recordBase,
-		"recordsV2":        recordsV2,
-		"ttfbRecordsV2":    ttfbRecordsV2,
-		"failureRecordsV2": failureRecordsV2,
-		"views":            views,
+		"recordBase":          recordBase,
+		"recordsV2":           recordsV2,
+		"completionRecordsV2": completionRecordsV2,
+		"ttfbRecordsV2":       ttfbRecordsV2,
+		"failureRecordsV2":    failureRecordsV2,
+		"views":               views,
 		"limits": map[string]any{
 			"limitId":                stringValue(loaded.Limits, "limit_id"),
 			"limitName":              stringValue(loaded.Limits, "limit_name"),
@@ -1825,13 +2076,14 @@ func buildPayload(root string, days int, cachePath string, cacheFiles map[string
 
 func buildRawPayload(payload map[string]any) RawExportPayload {
 	return RawExportPayload{
-		SchemaVersion:    payload["schemaVersion"],
-		RawSchemaVersion: 1,
-		Catalog:          payload["catalog"],
-		RecordBase:       payload["recordBase"],
-		RecordsV2:        payload["recordsV2"],
-		TTFBRecordsV2:    payload["ttfbRecordsV2"],
-		FailureRecordsV2: payload["failureRecordsV2"],
+		SchemaVersion:       payload["schemaVersion"],
+		RawSchemaVersion:    1,
+		Catalog:             payload["catalog"],
+		RecordBase:          payload["recordBase"],
+		RecordsV2:           payload["recordsV2"],
+		CompletionRecordsV2: payload["completionRecordsV2"],
+		TTFBRecordsV2:       payload["ttfbRecordsV2"],
+		FailureRecordsV2:    payload["failureRecordsV2"],
 	}
 }
 
@@ -1839,6 +2091,7 @@ func prepareMainPayloadForExport(payload map[string]any, outPath string, rawOutP
 	for _, key := range []string{
 		"recordBase",
 		"recordsV2",
+		"completionRecordsV2",
 		"ttfbRecordsV2",
 		"failureRecordsV2",
 		"catalog",

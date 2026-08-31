@@ -1,6 +1,6 @@
 {
   "name": "codexscope",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A local-first Codex usage and quota dashboard.",
   "private": false,
   "type": "commonjs",
@@ -11,6 +11,8 @@
     "check:live-data": "node verify_live_data.js",
     "check:tabs": "node verify_tabs.js",
     "check:theme": "node verify_theme.js",
+    "check:quota-layout": "node verify_quota_layout.js",
+    "check:interactions": "node verify_interactions.js",
     "check:launcher": "node verify_source_launcher.js",
     "generate": "go run generate_codex_data.go",
     "build:generator": "go build -trimpath -ldflags \"-s -w -buildid=\" -o codexscope-generator generate_codex_data.go",
@@ -18,7 +20,7 @@
     "release:local": "bash scripts/build-release.sh",
     "release:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows-release.ps1",
     "check:release:windows": "node verify_portable_release.js",
-    "verify": "npm run build:frontend && node verify_theme.js && node verify_responsive.js && node verify_source_launcher.js"
+    "verify": "npm run build:frontend && node verify_theme.js && node verify_quota_layout.js && node verify_responsive.js && node verify_interactions.js && node verify_source_launcher.js"
   },
   "devDependencies": {
     "playwright": "^1.56.0",

@@ -7,6 +7,7 @@ interface Window {
 }
 
 type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "rate";
+type ChartKind = "line" | "bar";
 
 (() => {
   let data = window.CODEXSCOPE_DATA || window.QUOTASCOPE_DATA || window.CODEXSCOPE_SAMPLE_DATA;
@@ -14,6 +15,7 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
   const uiState = {
     activeTab: "overview" as DashboardTabId,
     sessionsExpanded: false,
+    expandedSessionKey: "",
     modelsExpanded: false,
     sessionMode: "tokens",
     distributionMode: "calls",
@@ -22,6 +24,14 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
     modelQuery: "",
     trendMode: "cumulative",
     trendScale: "linear",
+    chartKinds: {
+      trend: "line",
+      requests: "line",
+      "peak-rate": "line",
+      "cache-hit": "line",
+      distribution: "bar",
+      cost: "bar",
+    } as Record<string, ChartKind>,
     trendSeries: {
       total: true,
       cached: true,
@@ -29,9 +39,11 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
       input: true,
       reasoning: true,
     },
+    chartInteractions: {} as Record<string, { index: number; pinned: boolean; visible: boolean }>,
   };
   const collapsedSessionLimit = 8;
   const collapsedModelLimit = 6;
+  let legacySessionRenderEpoch = 0;
 
   const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T | null;
   const clampPercent = (value) => Math.max(0, Math.min(100, Number(value) || 0));
@@ -76,6 +88,14 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
     const catalog = getCatalog(source);
     return Array.isArray(catalog.models) ? catalog.models : [];
   };
+  const getTurnCatalogRows = (source = getRawData()) => {
+    const catalog = getCatalog(source);
+    return Array.isArray(catalog.turns) ? catalog.turns : [];
+  };
+  const getEffortCatalogRows = (source = getRawData()) => {
+    const catalog = getCatalog(source);
+    return Array.isArray(catalog.efforts) ? catalog.efforts : [];
+  };
   let sessionsCatalogCache = null;
   let sessionsCatalogRowsCache = null;
   const getSessionsCatalog = () => {
@@ -93,11 +113,15 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
   const rawDataset = (source = getRawData()) => {
     const sessions = getSessionCatalogRows(source);
     const models = getModelCatalogRows(source);
+    const turns = getTurnCatalogRows(source);
+    const efforts = getEffortCatalogRows(source);
     const recordBase = Number(source.recordBase) || 0;
     return {
       ts: (value) => recordBase ? recordBase + (Number(value) || 0) : Number(value) || 0,
       sidAt: (index) => sessions[Number(index)]?.[0] || "unknown",
       modelAt: (index) => models[Number(index)] || "unknown",
+      turnAt: (index) => turns[Number(index)] || "unknown",
+      effortAt: (index) => efforts[Number(index)] || "unknown",
     };
   };
   const sourceWithRows = (field) => Array.isArray(data[field]) ? data : getRawData();
@@ -112,6 +136,20 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
       row?.[5] || 0,
       row?.[6] || 0,
       row?.[7] || 0,
+      dataset.turnAt(row?.[8]),
+      dataset.effortAt(row?.[9]),
+    ]);
+  };
+  const decodeCompletionRowsV2 = (rows, source) => {
+    const dataset = rawDataset(source);
+    return rows.map((row) => [
+      dataset.ts(row?.[0]),
+      dataset.sidAt(row?.[1]),
+      dataset.modelAt(row?.[2]),
+      row?.[3] || 0,
+      row?.[4] || 0,
+      dataset.turnAt(row?.[5]),
+      dataset.effortAt(row?.[6]),
     ]);
   };
   const decodeTtfbRowsV2 = (rows, source) => {
@@ -139,11 +177,18 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
     const source = sourceWithRows("ttfbRecordsV2");
     return sortByTime(Array.isArray(source.ttfbRecordsV2) ? decodeTtfbRowsV2(source.ttfbRecordsV2, source) : data.ttfbRecords);
   };
+  const decodeCompletionRecords = () => {
+    const source = sourceWithRows("completionRecordsV2");
+    return sortByTime(Array.isArray(source.completionRecordsV2)
+      ? decodeCompletionRowsV2(source.completionRecordsV2, source)
+      : (data.completionRecords || []));
+  };
   const decodeFailureRecords = () => {
     const source = sourceWithRows("failureRecordsV2");
     return sortByTime(Array.isArray(source.failureRecordsV2) ? decodeFailureRowsV2(source.failureRecordsV2, source) : data.failureRecords);
   };
   let recordsCache = null;
+  let completionRecordsCache = null;
   let ttfbRecordsCache = null;
   let failureRecordsCache = null;
   let rawDataPromise = null;
@@ -156,17 +201,20 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
         script.src = `${rawDataPath}${separator}codexscope-data=${encodeURIComponent(data.generatedAt || Date.now())}`;
         script.async = true;
         script.onload = () => {
+          script.remove();
           if (!window.CODEXSCOPE_RAW_DATA) {
             rawDataPromise = null;
             reject(new Error("raw data missing"));
             return;
           }
           recordsCache = null;
+          completionRecordsCache = null;
           ttfbRecordsCache = null;
           failureRecordsCache = null;
           resolve();
         };
         script.onerror = () => {
+          script.remove();
           rawDataPromise = null;
           reject(new Error(`failed to load ${rawDataPath}`));
         };
@@ -176,6 +224,7 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
     return rawDataPromise;
   };
   const getRecords = () => recordsCache || (recordsCache = decodeRecords());
+  const getCompletionRecords = () => completionRecordsCache || (completionRecordsCache = decodeCompletionRecords());
   const getTtfbRecords = () => ttfbRecordsCache || (ttfbRecordsCache = decodeTtfbRecords());
   const getFailureRecords = () => failureRecordsCache || (failureRecordsCache = decodeFailureRecords());
   let precomputedViews = data.views || {};
@@ -320,6 +369,7 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
     if (Math.abs(value) >= 1e3) return `${Math.round(value / 1e3)}K`;
     return `${Math.round(value)}`;
   };
+  const detailedNumber = (value) => Math.round(Number(value) || 0).toLocaleString("en-US");
   const convertCost = (value) => {
     const amount = Number(value) || 0;
     return uiState.currency === "CNY" ? amount * fxState.usdCny : amount;
@@ -343,6 +393,16 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
     if (Math.abs(amount) >= 1000) return `$${Math.round(amount).toLocaleString()}`;
     if (Math.abs(amount) >= 100) return `$${amount.toFixed(0)}`;
     return `$${amount.toFixed(2)}`;
+  };
+  const moneyDetailed = (value) => {
+    const amount = convertCost(value);
+    const symbol = uiState.currency === "CNY" ? "¥" : "$";
+    const absolute = Math.abs(amount);
+    if (!absolute) return `${symbol}0.00`;
+    if (absolute >= 1000) return `${symbol}${Math.round(amount).toLocaleString("en-US")}`;
+    const decimals = absolute >= 1 ? 2 : absolute >= .01 ? 4 : absolute >= .0001 ? 6 : 8;
+    const precise = amount.toFixed(decimals).replace(/(\.\d*?[1-9])0+$|\.0+$/, "$1");
+    return `${symbol}${precise}`;
   };
   const normalizePricingRules = (rules) => Array.isArray(rules)
     ? rules.map((rule) => ({
@@ -509,13 +569,29 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
       tpm: peakTotal / (RATE_WINDOW_MS / 60000),
     };
   };
+  const medianMillis = (values) => {
+    if (!values.length) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    const middle = Math.floor(sorted.length / 2);
+    return sorted.length % 2
+      ? sorted[middle]
+      : Math.trunc((sorted[middle - 1] + sorted[middle]) / 2);
+  };
+  const percentileMillis = (values, percentile) => {
+    if (!values.length) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    const rank = Math.max(0, Math.min(sorted.length - 1, Math.ceil(percentile * sorted.length) - 1));
+    return sorted[rank];
+  };
   const computeStats = (range) => {
     // All date-filtered views are derived from compact local records here.
     // No network request is needed to switch ranges or ranking modes.
     const records = getRecords();
+    const completionRecords = getCompletionRecords();
     const failureRecords = getFailureRecords();
     const ttfbRecords = getTtfbRecords();
     const filtered = rowsInRange(records, range);
+    const completions = rowsInRange(completionRecords, range);
     const failures = rowsInRange(failureRecords, range);
     const ttfb = rowsInRange(ttfbRecords, range);
     const totals = emptyUsage();
@@ -537,16 +613,55 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
       totals.requests += 1;
       const sid = record[1] || "unknown";
       const model = record[2] || "unknown";
+      const effort = record[9] || "unknown";
       const catalog = sessionCatalog[sid] || {};
-      const session = bySession.get(sid) || { name: catalog.name || `会话 ${sid.slice(-6)}`, model, tokens: 0, requests: 0, status: "ok" };
+      const session = bySession.get(sid) || {
+        id: sid,
+        name: catalog.name || `会话 ${sid.slice(-6)}`,
+        model,
+        latestModel: model,
+        latestEffort: effort,
+        latestAt: 0,
+        tokens: 0,
+        requests: 0,
+        status: "ok",
+        modelBreakdown: new Map(),
+        effortBreakdown: new Map(),
+        ttfbValues: [],
+        durationValues: [],
+      };
+      if (recordTime(record) >= session.latestAt) {
+        session.latestAt = recordTime(record);
+        session.model = model;
+        session.latestModel = model;
+        session.latestEffort = effort;
+      }
       session.tokens += record[7] || 0;
       session.requests += 1;
+      const modelPart = session.modelBreakdown.get(model) || { model, tokens: 0, requests: 0 };
+      modelPart.tokens += record[7] || 0;
+      modelPart.requests += 1;
+      session.modelBreakdown.set(model, modelPart);
+      const effortPart = session.effortBreakdown.get(effort) || { effort, tokens: 0, requests: 0 };
+      effortPart.tokens += record[7] || 0;
+      effortPart.requests += 1;
+      session.effortBreakdown.set(effort, effortPart);
       bySession.set(sid, session);
       const modelRow = byModel.get(model) || { name: model, tokens: 0, requests: 0, cost: 0, latencyTotal: 0, latencyCount: 0 };
       modelRow.tokens += record[7] || 0;
       modelRow.requests += 1;
       modelRow.cost += recordCost.total || 0;
       byModel.set(model, modelRow);
+    }
+    for (const record of completions) {
+      const session = bySession.get(record[1] || "unknown");
+      if (!session) continue;
+      if ((record[4] || 0) > 0) session.ttfbValues.push(record[4]);
+      if ((record[3] || 0) > 0) session.durationValues.push(record[3]);
+    }
+    for (const record of failures) {
+      const session = bySession.get(record[1] || "unknown");
+      if (session) session.status = "warn";
     }
     for (const record of ttfb) {
       const model = record[2] || "unknown";
@@ -556,8 +671,15 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
       byModel.set(model, modelRow);
     }
     const duration = Math.max(1, range.end - range.start);
-    const trendBuckets = buildBuckets(filtered, range, chooseNiceStep(duration, 180), recordCosts);
-    const distributionBuckets = buildBuckets(filtered, range, chooseNiceStep(duration, 32), recordCosts);
+    // No usage records means there is no observed time series. Returning an
+    // empty series keeps charts in their explicit empty state instead of
+    // fabricating a full range of zero-valued interactive buckets.
+    const trendBuckets = filtered.length
+      ? buildBuckets(filtered, range, chooseNiceStep(duration, 180), recordCosts)
+      : [];
+    const distributionBuckets = filtered.length
+      ? buildBuckets(filtered, range, chooseNiceStep(duration, 32), recordCosts)
+      : [];
     const peak = computePeakRate(filtered, range);
     const cacheHit = totals.input ? totals.cached / totals.input * 100 : 0;
     const { successRate, failureRate } = successFailureRates(totals.requests, failures.length);
@@ -603,8 +725,21 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
       trend: trendBuckets,
       distribution: distributionBuckets,
       sessions: sessions.map((row, index) => ({
-        ...row,
+        id: row.id,
         rank: index + 1,
+        name: row.name,
+        model: row.model,
+        latestModel: row.latestModel,
+        latestEffort: row.latestEffort,
+        modelBreakdown: (Array.from(row.modelBreakdown.values()) as any[]).sort((a, b) => b.tokens - a.tokens || String(a.model).localeCompare(String(b.model))),
+        effortBreakdown: (Array.from(row.effortBreakdown.values()) as any[]).sort((a, b) => b.tokens - a.tokens || String(a.effort).localeCompare(String(b.effort))),
+        ttfbMedianMs: medianMillis(row.ttfbValues),
+        ttfbP90Ms: percentileMillis(row.ttfbValues, 0.9),
+        durationMedianMs: medianMillis(row.durationValues),
+        durationP90Ms: percentileMillis(row.durationValues, 0.9),
+        tokens: row.tokens,
+        requests: row.requests,
+        status: row.status,
         tokensLabel: fmt(row.tokens),
         tokenPercent: Math.round(row.tokens / maxSessionTokens * 100),
         requestPercent: Math.round(row.requests / maxSessionRequests * 100),
@@ -824,6 +959,269 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
     if (path) path.setAttribute("d", d);
   };
 
+  const chartInteractionState = (id) => {
+    if (!uiState.chartInteractions[id]) {
+      uiState.chartInteractions[id] = { index: -1, pinned: false, visible: false };
+    }
+    return uiState.chartInteractions[id];
+  };
+  const chartTooltipMarkup = (title, lines) => `
+    <strong>${esc(title)}</strong>
+    ${lines.map((line) => `<span><i style="--series-color:${line.color || "var(--blue-2)"}"></i>${esc(line.label)} <b>${esc(line.value)}</b></span>`).join("")}`;
+  const chartKindFor = (id): ChartKind => uiState.chartKinds[id] === "bar" ? "bar" : "line";
+  const syncChartKindControls = (target = "") => {
+    document.querySelectorAll<HTMLElement>(`.chart-kind${target ? `[data-chart-target="${target}"]` : ""}`).forEach((button) => {
+      const active = button.dataset.chartKind === chartKindFor(button.dataset.chartTarget || "");
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
+  };
+  const interactionPoint = (config, index) => {
+    if (typeof config.point === "function") return config.point(index, config.rows[index]);
+    return {
+      x: config.rows.length > 1 ? index / (config.rows.length - 1) : .5,
+      y: .5,
+    };
+  };
+  const chartPointToClient = (element, point) => {
+    const normalizedX = Math.max(0, Math.min(1, Number(point?.x) || 0));
+    const normalizedY = Math.max(0, Math.min(1, Number(point?.y) || 0));
+    if (element instanceof SVGSVGElement) {
+      const viewBox = element.viewBox?.baseVal;
+      const matrix = element.getScreenCTM();
+      if (viewBox?.width && viewBox?.height && matrix) {
+        const svgPoint = element.createSVGPoint();
+        svgPoint.x = viewBox.x + normalizedX * viewBox.width;
+        svgPoint.y = viewBox.y + normalizedY * viewBox.height;
+        const clientPoint = svgPoint.matrixTransform(matrix);
+        return { x: clientPoint.x, y: clientPoint.y };
+      }
+    }
+    const rect = element.getBoundingClientRect();
+    return {
+      x: rect.left + normalizedX * rect.width,
+      y: rect.top + normalizedY * rect.height,
+    };
+  };
+  const chartClientBounds = (element) => {
+    if (element instanceof SVGSVGElement) {
+      const viewBox = element.viewBox?.baseVal;
+      const matrix = element.getScreenCTM();
+      if (viewBox?.width && viewBox?.height && matrix) {
+        const first = element.createSVGPoint();
+        first.x = viewBox.x;
+        first.y = viewBox.y;
+        const last = element.createSVGPoint();
+        last.x = viewBox.x + viewBox.width;
+        last.y = viewBox.y + viewBox.height;
+        const start = first.matrixTransform(matrix);
+        const end = last.matrixTransform(matrix);
+        return {
+          left: Math.min(start.x, end.x),
+          top: Math.min(start.y, end.y),
+          width: Math.abs(end.x - start.x),
+          height: Math.abs(end.y - start.y),
+        };
+      }
+    }
+    return element.getBoundingClientRect();
+  };
+  const chartPointerRatio = (event, element) => {
+    if (element instanceof SVGSVGElement) {
+      const viewBox = element.viewBox?.baseVal;
+      const matrix = element.getScreenCTM();
+      if (viewBox?.width && matrix) {
+        const clientPoint = element.createSVGPoint();
+        clientPoint.x = event.clientX;
+        clientPoint.y = event.clientY;
+        const localPoint = clientPoint.matrixTransform(matrix.inverse());
+        return (localPoint.x - viewBox.x) / viewBox.width;
+      }
+    }
+    const rect = element.getBoundingClientRect();
+    return rect.width ? (event.clientX - rect.left) / rect.width : 0;
+  };
+  const syncChartInteraction = (config, index, visible = true) => {
+    const element = config.element as HTMLElement;
+    const rows = config.rows || [];
+    const state = chartInteractionState(config.id);
+    const host = (config.host || element.parentElement) as HTMLElement | null;
+    if (!host || !rows.length) {
+      state.visible = false;
+      return;
+    }
+    const safeIndex = Math.max(0, Math.min(rows.length - 1, Number(index) || 0));
+    state.index = safeIndex;
+    state.visible = visible || state.pinned;
+    const row = rows[safeIndex];
+    const point = interactionPoint(config, safeIndex);
+    element.setAttribute("aria-valuemin", "0");
+    element.setAttribute("aria-valuemax", String(rows.length - 1));
+    element.setAttribute("aria-valuenow", String(safeIndex));
+    element.setAttribute("aria-valuetext", config.ariaText(row, safeIndex));
+    element.dataset.chartPinned = String(state.pinned);
+    element.dataset.chartSelectedIndex = String(safeIndex);
+    host.classList.add("chart-interaction-host");
+
+    let tooltip = host.querySelector<HTMLElement>(`[data-chart-tooltip="${config.id}"]`);
+    if (!tooltip) {
+      tooltip = document.createElement("div");
+      tooltip.className = "chart-interaction-tooltip";
+      tooltip.dataset.chartTooltip = config.id;
+      tooltip.setAttribute("role", "tooltip");
+      tooltip.setAttribute("aria-live", "polite");
+      host.appendChild(tooltip);
+    }
+    let crosshair = host.querySelector<HTMLElement>(`[data-chart-crosshair="${config.id}"]`);
+    if (!crosshair) {
+      crosshair = document.createElement("span");
+      crosshair.className = "chart-interaction-crosshair";
+      crosshair.dataset.chartCrosshair = config.id;
+      host.appendChild(crosshair);
+    }
+    let marker = host.querySelector<HTMLElement>(`[data-chart-marker="${config.id}"]`);
+    if (!marker) {
+      marker = document.createElement("span");
+      marker.className = "chart-interaction-marker";
+      marker.dataset.chartMarker = config.id;
+      host.appendChild(marker);
+    }
+    const elementRect = chartClientBounds(element);
+    const hostRect = host.getBoundingClientRect();
+    const configuredClientPoint = typeof config.clientPoint === "function" ? config.clientPoint(safeIndex, row) : null;
+    const clientPoint = configuredClientPoint && Number.isFinite(configuredClientPoint.x) && Number.isFinite(configuredClientPoint.y)
+      ? configuredClientPoint
+      : chartPointToClient(element, point);
+    const left = clientPoint.x - hostRect.left;
+    const top = clientPoint.y - hostRect.top;
+    const boundedLeft = Math.max(8, Math.min(Math.max(8, hostRect.width - 8), left));
+    const boundedTop = Math.max(8, Math.min(Math.max(8, hostRect.height - 8), top));
+    tooltip.innerHTML = config.tooltip(row, safeIndex);
+    tooltip.style.left = `${boundedLeft}px`;
+    tooltip.style.top = `${boundedTop}px`;
+    tooltip.classList.toggle("align-right", boundedLeft > hostRect.width * .62);
+    tooltip.classList.toggle("place-below", boundedTop < 58);
+    tooltip.hidden = !state.visible;
+    crosshair.style.left = `${left}px`;
+    crosshair.style.top = `${Math.max(0, elementRect.top - hostRect.top)}px`;
+    crosshair.style.height = `${elementRect.height}px`;
+    crosshair.hidden = !state.visible;
+    marker.style.left = `${left}px`;
+    marker.style.top = `${top}px`;
+    marker.hidden = !state.visible;
+  };
+  const hideChartInteraction = (config) => {
+    if (!config?.id) return;
+    const state = chartInteractionState(config.id);
+    if (state.pinned) return;
+    state.visible = false;
+    const host = (config.host || config.element.parentElement) as HTMLElement | null;
+    host?.querySelector<HTMLElement>(`[data-chart-tooltip="${config.id}"]`)?.setAttribute("hidden", "");
+    host?.querySelector<HTMLElement>(`[data-chart-crosshair="${config.id}"]`)?.setAttribute("hidden", "");
+    host?.querySelector<HTMLElement>(`[data-chart-marker="${config.id}"]`)?.setAttribute("hidden", "");
+  };
+  const clearChartInteraction = (id, element = null, host = null) => {
+    const target = element as HTMLElement | null;
+    const active = target ? (target as any).__codexScopeChartConfig : null;
+    const interactionHost = (host || active?.host || target?.parentElement) as HTMLElement | null;
+    const state = chartInteractionState(id);
+    state.index = -1;
+    state.pinned = false;
+    state.visible = false;
+    if (target) {
+      delete (target as any).__codexScopeChartConfig;
+      delete target.dataset.chartId;
+      delete target.dataset.chartPinned;
+      delete target.dataset.chartSelectedIndex;
+      ["role", "tabindex", "aria-label", "aria-valuemin", "aria-valuemax", "aria-valuenow", "aria-valuetext"].forEach((name) => target.removeAttribute(name));
+    }
+    interactionHost?.querySelector<HTMLElement>(`[data-chart-tooltip="${id}"]`)?.remove();
+    interactionHost?.querySelector<HTMLElement>(`[data-chart-crosshair="${id}"]`)?.remove();
+    interactionHost?.querySelector<HTMLElement>(`[data-chart-marker="${id}"]`)?.remove();
+    if (!interactionHost?.querySelector("[data-chart-tooltip], [data-chart-crosshair], [data-chart-marker]")) {
+      interactionHost?.classList.remove("chart-interaction-host");
+    }
+  };
+  const chartIndexFromPointer = (event, config) => {
+    if (typeof config.indexFromEvent === "function") {
+      const selected = config.indexFromEvent(event);
+      if (Number.isInteger(selected)) return selected;
+    }
+    const start = Number(config.xStart ?? 0);
+    const end = Number(config.xEnd ?? 1);
+    const ratio = chartPointerRatio(event, config.element);
+    const plotRatio = Math.max(0, Math.min(1, (ratio - start) / Math.max(.001, end - start)));
+    return Math.round(plotRatio * Math.max(0, config.rows.length - 1));
+  };
+  const bindChartInteraction = (config) => {
+    const element = config.element as HTMLElement;
+    if (!element) return;
+    element.dataset.chartId = config.id;
+    element.setAttribute("role", "slider");
+    element.setAttribute("tabindex", "0");
+    element.setAttribute("aria-label", config.label);
+    element.removeAttribute("aria-hidden");
+    (element as any).__codexScopeChartConfig = config;
+    if (!(element as any).__codexScopeChartBound) {
+      (element as any).__codexScopeChartBound = true;
+      let dragging = false;
+      const currentConfig = () => (element as any).__codexScopeChartConfig;
+      element.addEventListener("pointermove", (event) => {
+        const active = currentConfig();
+        if (!active?.rows?.length) return;
+        syncChartInteraction(active, chartIndexFromPointer(event, active), true);
+      });
+      element.addEventListener("pointerdown", (event) => {
+        const active = currentConfig();
+        if (!active?.rows?.length) return;
+        dragging = true;
+        const state = chartInteractionState(active.id);
+        state.pinned = false;
+        syncChartInteraction(active, chartIndexFromPointer(event, active), true);
+        element.setPointerCapture?.(event.pointerId);
+      });
+      element.addEventListener("pointerup", (event) => {
+        const active = currentConfig();
+        if (!active?.rows?.length || !dragging) return;
+        dragging = false;
+        const state = chartInteractionState(active.id);
+        state.pinned = true;
+        syncChartInteraction(active, chartIndexFromPointer(event, active), true);
+        element.releasePointerCapture?.(event.pointerId);
+      });
+      element.addEventListener("pointercancel", () => { dragging = false; });
+      element.addEventListener("pointerleave", () => hideChartInteraction(currentConfig()));
+      element.addEventListener("keydown", (event) => {
+        const active = currentConfig();
+        if (!active?.rows?.length) return;
+        const state = chartInteractionState(active.id);
+        const last = active.rows.length - 1;
+        if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+          event.preventDefault();
+          const current = state.index >= 0 ? state.index : (event.key === "ArrowLeft" || event.key === "End" ? last : 0);
+          const next = event.key === "Home" ? 0 : event.key === "End" ? last : event.key === "ArrowLeft" ? Math.max(0, current - 1) : Math.min(last, current + 1);
+          state.pinned = false;
+          syncChartInteraction(active, next, true);
+          return;
+        }
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          state.pinned = !state.pinned;
+          syncChartInteraction(active, state.index >= 0 ? state.index : last, true);
+          return;
+        }
+        if (event.key === "Escape") {
+          state.pinned = false;
+          hideChartInteraction(active);
+        }
+      });
+    }
+    const state = chartInteractionState(config.id);
+    const initialIndex = state.index >= 0 ? Math.min(state.index, config.rows.length - 1) : Math.max(0, config.rows.length - 1);
+    syncChartInteraction(config, initialIndex, state.pinned || state.visible);
+    if (!state.pinned && !state.visible) hideChartInteraction(config);
+  };
+
   const seriesConfig = {
     total: { label: "总量", color: "var(--blue)", width: 3, area: "areaBlue" },
     cached: { label: "缓存", color: "var(--teal)", width: 2.6, area: "areaTeal" },
@@ -876,21 +1274,28 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
   };
 
   const renderChart = () => {
-    // Draw the main SVG trend from active series, selected trend mode, and
-    // selected y-axis scale. The tooltip marks the latest cumulative point
-    // or the highest interval bucket.
+    // Draw the main SVG trend from active series and selected scale. The
+    // shared interaction layer owns hover, drag, keyboard and pinned details.
     const svg = $("trendChart");
     const baseRows = trendRows || [];
     if (!svg) return;
     renderTrendControls();
+    syncChartKindControls("trend");
+    const chartKind = chartKindFor("trend");
+    svg.dataset.chartKind = chartKind;
+    svg.setAttribute("aria-label", `Token 消耗${chartKind === "bar" ? "柱状" : "折线"}图`);
     if (baseRows.length < 2) {
+      clearChartInteraction("trend", svg, svg.parentElement);
       setText("chartMeta", summary.loadError || `累计 ${summary.totalTokensLabel || "--"}`);
       svg.innerHTML = "";
       return;
     }
     const rows = trendRowsForMode(baseRows);
     const activeKeys = trendValueKeys.filter((key) => uiState.trendSeries[key]);
-    if (!activeKeys.length) return;
+    if (!activeKeys.length) {
+      clearChartInteraction("trend", svg, svg.parentElement);
+      return;
+    }
     const primaryKey = activeKeys.includes("total") ? "total" : activeKeys[0];
     const primaryConfig = seriesConfig[primaryKey];
     const compactChart = window.innerWidth <= 480;
@@ -900,13 +1305,25 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
     const left = compactChart ? 14 : 40;
     const right = compactChart ? 990 : 985;
     const top = 22, bottom = 194;
-    const x = (index) => Math.round(left + (right - left) * index / (rows.length - 1));
+    const plotWidth = right - left;
+    const barSlotWidth = plotWidth / Math.max(1, rows.length);
+    const x = (index) => chartKind === "bar"
+      ? left + barSlotWidth * (index + .5)
+      : left + plotWidth * index / Math.max(1, rows.length - 1);
+    const barGroupWidth = Math.max(.8, Math.min(26, barSlotWidth * .78));
+    const barGap = activeKeys.length > 1 ? Math.min(1.2, barGroupWidth * .06) : 0;
+    const barWidth = Math.max(.35, (barGroupWidth - barGap * (activeKeys.length - 1)) / activeKeys.length);
+    const seriesX = (index, key) => {
+      if (chartKind !== "bar") return x(index);
+      const seriesIndex = Math.max(0, activeKeys.indexOf(key));
+      return x(index) - barGroupWidth / 2 + seriesIndex * (barWidth + barGap) + barWidth / 2;
+    };
     const y = (value) => {
       const safeValue = Math.max(0, Number(value) || 0);
       const ratio = logScale ? Math.log10(safeValue + 1) / logMax : safeValue / maxY;
       return Math.round(bottom - (bottom - top) * ratio);
     };
-    const series = (key) => rows.map((row, index) => [x(index), y(row[key] || 0)]);
+    const series = (key) => rows.map((row, index) => [seriesX(index, key), y(row[key] || 0)]);
     const primary = series(primaryKey);
     const peakIndex = uiState.trendMode === "interval"
       ? rows.reduce((best, row, index) => (row[primaryKey] || 0) > (rows[best][primaryKey] || 0) ? index : best, 0)
@@ -928,14 +1345,18 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
     const metaLabel = `${metaPrefix} ${primaryConfig.label} ${fmt(rows[peakIndex][primaryKey] || 0)}`;
     const stepLabel = baseRows[0]?.stepLabel ? ` · ${baseRows[0].stepLabel}` : "";
     setText("chartMeta", `${metaLabel}${stepLabel}`);
-    const tooltip = compactChart ? "" : `
-      <rect x="${Math.min(right - 150, Math.max(left + 8, peakPoint[0] - 16))}" y="${Math.max(0, peakPoint[1] - 34)}" width="146" height="34" rx="5" class="tooltip-box"/>
-      <text x="${Math.min(right - 137, Math.max(left + 21, peakPoint[0] - 3))}" y="${Math.max(21, peakPoint[1] - 13)}" fill="#1a2d49" font-size="13" font-weight="700">${esc(metaLabel)}</text>`;
     const areaPath = `<path data-series-area="${primaryKey}" d="${area(primary)}" fill="url(#areaSelected)"/>`;
     const linePaths = activeKeys.map((key) => {
       const config = seriesConfig[key];
       return `<path data-series="${key}" d="${smoothPath(series(key))}" fill="none" stroke="${config.color}" stroke-width="${config.width}" stroke-linecap="round"/>`;
     }).join("");
+    const barRects = rows.map((row, index) => activeKeys.map((key, seriesIndex) => {
+      const config = seriesConfig[key];
+      const barX = x(index) - barGroupWidth / 2 + seriesIndex * (barWidth + barGap);
+      const barY = y(row[key] || 0);
+      return `<rect data-series="${key}" data-chart-index="${index}" x="${barX.toFixed(2)}" y="${barY}" width="${barWidth.toFixed(2)}" height="${Math.max(0, bottom - barY)}" rx="${Math.min(2.5, barWidth / 2).toFixed(2)}" fill="${config.color}" opacity="${key === primaryKey ? ".92" : ".68"}"/>`;
+    }).join("")).join("");
+    const chartVisuals = chartKind === "bar" ? barRects : `${areaPath}${linePaths}`;
     svg.innerHTML = `
       <defs>
         <linearGradient id="areaSelected" x1="0" y1="0" x2="0" y2="1">
@@ -946,23 +1367,68 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
       ${gridLines}
       <line x1="${left}" y1="${bottom}" x2="${right}" y2="${bottom}" class="axis-line"/>
       ${yLabels}
-      ${areaPath}
-      ${linePaths}
+      ${chartVisuals}
       <line x1="${peakPoint[0]}" y1="${peakPoint[1]}" x2="${peakPoint[0]}" y2="${bottom}" stroke="${primaryConfig.color}" stroke-width="1.5" stroke-dasharray="6 5"/>
       <circle cx="${peakPoint[0]}" cy="${peakPoint[1]}" r="9" fill="#fff" stroke="${primaryConfig.color}" stroke-width="2"/>
       <circle cx="${peakPoint[0]}" cy="${peakPoint[1]}" r="4.6" fill="${primaryConfig.color}"/>
-      ${tooltip}
       ${xLabels}
     `;
+    bindChartInteraction({
+      id: "trend",
+      element: svg,
+      host: svg.parentElement,
+      rows,
+      label: "Token 时间节点，左右方向键移动，Enter 固定提示",
+      xStart: x(0) / 1000,
+      xEnd: x(rows.length - 1) / 1000,
+      point: (index) => ({ x: primary[index][0] / 1000, y: y(rows[index]?.[primaryKey] || 0) / 214 }),
+      tooltip: (row) => chartTooltipMarkup(row.label || "--", activeKeys.map((key) => ({
+        label: seriesConfig[key].label,
+        value: `${detailedNumber(row[key] || 0)} Token`,
+        color: seriesConfig[key].color,
+      }))),
+      ariaText: (row) => `${row.label || "--"}，${activeKeys.map((key) => `${seriesConfig[key].label} ${detailedNumber(row[key] || 0)} Token`).join("，")}`,
+    });
   };
 
+  const formatLatency = (value) => {
+    const milliseconds = Math.max(0, Number(value) || 0);
+    if (!milliseconds) return "--";
+    return milliseconds < 1000 ? `${Math.round(milliseconds)}ms` : `${(milliseconds / 1000).toFixed(2)}s`;
+  };
+  const sessionKeyFor = (row, index) => String(row.id || row.sid || `legacy-${legacySessionRenderEpoch}-${index}`);
+  const renderSessionBreakdown = (rows, key, emptyLabel) => {
+    if (!Array.isArray(rows) || !rows.length) return `<span class="session-detail-empty">${emptyLabel}</span>`;
+    return rows.map((row) => `
+      <span class="session-detail-chip">
+        <strong>${esc(row[key] || "unknown")}</strong>
+        <span>${esc(fmt(row.tokens || 0))} Token · ${esc(row.requests || 0)} 次</span>
+      </span>`).join("");
+  };
+  const renderSessionDetail = (row, index, sessionKey) => `
+    <div class="session-detail" id="sessionDetail-${index}" data-session-index="${index}" data-session-key="${esc(sessionKey)}" role="region" aria-label="${esc(row.name)} 会话详情">
+      <div class="session-detail-group">
+        <span class="session-detail-label">模型分布</span>
+        <div class="session-detail-chips">${renderSessionBreakdown(row.modelBreakdown, "model", "暂无模型明细")}</div>
+      </div>
+      <div class="session-detail-group">
+        <span class="session-detail-label">推理程度</span>
+        <div class="session-detail-chips">${renderSessionBreakdown(row.effortBreakdown, "effort", "暂无推理档位")}</div>
+      </div>
+      <div class="session-latency-grid">
+        <div><span>TTFB 中位数</span><strong>${formatLatency(row.ttfbMedianMs)}</strong></div>
+        <div><span>TTFB P90</span><strong>${formatLatency(row.ttfbP90Ms)}</strong></div>
+        <div><span>整轮耗时中位数</span><strong>${formatLatency(row.durationMedianMs)}</strong></div>
+        <div><span>整轮耗时 P90</span><strong>${formatLatency(row.durationP90Ms)}</strong></div>
+      </div>
+    </div>`;
   const renderSessions = () => {
     // Session ranking is intentionally re-sorted at render time so the same
     // computed rows can switch between Token and request-count rankings.
     const allRows = sessionRows || [];
     const query = uiState.sessionQuery.trim().toLowerCase();
     const matchingRows = query
-      ? allRows.filter((row) => `${row.name || ""} ${row.model || ""}`.toLowerCase().includes(query))
+      ? allRows.filter((row) => `${row.name || ""} ${row.model || ""} ${row.latestEffort || ""} ${(row.modelBreakdown || []).map((part) => part.model).join(" ")}`.toLowerCase().includes(query))
       : allRows;
     const tokenMode = uiState.sessionMode !== "requests";
     document.querySelectorAll<HTMLElement>(".session-mode").forEach((button) => {
@@ -985,14 +1451,21 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
       if (toggle) toggle.hidden = true;
       return;
     }
-    $("sessionList").innerHTML = head + rows.map((row, index) => `
-      <div class="session-row">
-        <span class="rank-name"><i class="num ${index > 2 ? "muted" : ""}">${index + 1}</i><span class="rank-text">${esc(row.name)}</span></span>
-        <span class="pill">${esc(row.model)}</span>
-        <span class="mini-bar"><span style="width:${Math.max(4, tokenMode ? row.tokenPercent || 0 : row.requestPercent || 0)}%"></span></span>
-        <span>${tokenMode ? esc(row.tokensLabel) : esc(row.requests)}</span>
-        <span class="status"></span>
-      </div>`).join("");
+    $("sessionList").innerHTML = head + rows.map((row, index) => {
+      const sessionKey = sessionKeyFor(row, index);
+      const expanded = uiState.expandedSessionKey === sessionKey;
+      return `
+        <div class="session-entry ${expanded ? "expanded" : ""}">
+          <div class="session-row" data-session-index="${index}" data-session-key="${esc(sessionKey)}" role="button" tabindex="0" aria-expanded="${expanded}" aria-controls="sessionDetail-${index}">
+            <span class="rank-name"><i class="num ${index > 2 ? "muted" : ""}">${index + 1}</i><span class="rank-text">${esc(row.name)}</span></span>
+            <span class="session-model-stack"><span class="pill">${esc(row.latestModel || row.model)}</span><span class="effort-pill">${esc(row.latestEffort || "unknown")}</span></span>
+            <span class="mini-bar"><span style="width:${Math.max(4, tokenMode ? row.tokenPercent || 0 : row.requestPercent || 0)}%"></span></span>
+            <span>${tokenMode ? esc(row.tokensLabel) : esc(row.requests)}</span>
+            <span class="session-state"><span class="status ${row.status === "warn" ? "warn" : ""}"></span><span class="session-chevron" aria-hidden="true">⌄</span></span>
+          </div>
+          ${expanded ? renderSessionDetail(row, index, sessionKey) : ""}
+        </div>`;
+    }).join("");
     const toggle = $("toggleSessions");
     if (toggle) {
       toggle.hidden = rankedRows.length <= collapsedSessionLimit;
@@ -1058,6 +1531,9 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
   const renderDistribution = () => {
     const chart = $("distributionChart");
     if (!chart) return;
+    const chartKind = chartKindFor("distribution");
+    syncChartKindControls("distribution");
+    chart.dataset.chartKind = chartKind;
     document.querySelectorAll<HTMLElement>(".dist-mode").forEach((button) => {
       button.classList.toggle("active", button.dataset.distMode === uiState.distributionMode);
     });
@@ -1070,6 +1546,7 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
     const totalLabel = tokenMode ? `${fmt(totalValue)} Token` : `${totalValue.toLocaleString()} 次`;
     setText("rangeSummary", `${summary.rangeLabel || ""}${summary.rangeLabel ? " · " : ""}${totalLabel}`.replace(/^ · /, ""));
     if (!rows.length || !totalValue) {
+      clearChartInteraction("distribution", chart, chart);
       chart.style.setProperty("--bar-count", "1");
       chart.innerHTML = `<div class="dist-empty">当前范围没有${metricName}记录</div>`;
       return;
@@ -1111,11 +1588,11 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
     const bars = rows.map((row, index) => {
       const value = row[metricKey] || 0;
       const label = tokenMode ? tinyToken(value) : String(value);
-      const detailLabel = tokenMode ? fmt(value) : String(value);
+      const detailLabel = detailedNumber(value);
       const height = value ? Math.max(3, Math.round(value / axisMax * 100)) : 0;
       const showValue = valueLabelIndices.has(index);
       return `
-      <div class="dist-bar" title="${esc(row.label)} · ${esc(detailLabel)} ${unitLabel}" aria-label="${esc(row.label)} ${esc(detailLabel)} ${unitLabel}">
+      <div class="dist-bar" data-chart-index="${index}" aria-label="${esc(row.label)} ${esc(detailLabel)} ${unitLabel}">
         <span class="dist-bar-value${showValue ? "" : " is-hidden"}">${showValue ? esc(label) : ""}</span>
         <span class="dist-bar-fill ${tokenMode ? "token" : ""}" style="height:${height}%"></span>
         <span class="dist-bar-label">${esc(row.label)}</span>
@@ -1129,6 +1606,26 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
       const showLabel = isEdge || (index % xLabelStride === 0 && clearsLastLabel);
       return `<span class="dist-x-label">${showLabel ? esc(row.label) : ""}</span>`;
     }).join("");
+    const lineWidth = 1000;
+    const lineHeight = 180;
+    const lineLeft = 12;
+    const lineRight = 988;
+    const lineTop = 12;
+    const lineBottom = 168;
+    const lineX = (index) => lineLeft + (lineRight - lineLeft) * index / Math.max(1, rows.length - 1);
+    const lineY = (value) => lineBottom - (lineBottom - lineTop) * (Number(value) || 0) / axisMax;
+    const linePoints = rows.map((row, index) => [lineX(index), lineY(row[metricKey] || 0)]);
+    const linePath = smoothPath(linePoints);
+    const lineArea = `${linePath} L${lineX(rows.length - 1)} ${lineBottom} L${lineX(0)} ${lineBottom} Z`;
+    const linePlot = `
+      <div class="dist-plot line-mode">
+        <svg class="distribution-line-chart" width="1000" height="180" viewBox="0 0 1000 180" preserveAspectRatio="none" aria-hidden="true">
+          <defs><linearGradient id="distributionArea" x1="0" y1="0" x2="0" y2="1"><stop stop-color="${tokenMode ? "var(--teal)" : "var(--blue-2)"}" stop-opacity=".2"/><stop offset="1" stop-color="${tokenMode ? "var(--teal)" : "var(--blue-2)"}" stop-opacity=".02"/></linearGradient></defs>
+          <path d="${lineArea}" fill="url(#distributionArea)"/>
+          <path data-series="distribution" d="${linePath}" fill="none" stroke="${tokenMode ? "var(--teal)" : "var(--blue-2)"}" stroke-width="2.5" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+        </svg>
+      </div>`;
+    const barPlot = `<div class="dist-plot">${bars}</div>`;
     chart.innerHTML = `
       <div class="dist-y-axis" aria-hidden="true">
         <span>${esc(yLabel(axisMax))}</span>
@@ -1137,9 +1634,42 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
         <span></span>
         <span>0</span>
       </div>
-      <div class="dist-plot">${bars}</div>
+      ${chartKind === "line" ? linePlot : barPlot}
       <div class="dist-axis-spacer" aria-hidden="true"></div>
       <div class="dist-x-axis" aria-label="时间段">${xLabels}</div>`;
+    bindChartInteraction({
+      id: "distribution",
+      element: chart,
+      host: chart,
+      rows,
+      label: "速率分布时间节点，左右方向键移动，Enter 固定提示",
+      indexFromEvent: (event) => {
+        const target = event.target instanceof Element ? event.target.closest(".dist-bar[data-chart-index]") as HTMLElement | null : null;
+        if (target) return Number(target.dataset.chartIndex);
+        const plot = chart.querySelector<HTMLElement>(".dist-plot");
+        if (!plot) return null;
+        const rect = plot.getBoundingClientRect();
+        const ratio = Math.max(0, Math.min(1, rect.width ? (event.clientX - rect.left) / rect.width : 0));
+        if (chartKind === "bar") return Math.min(rows.length - 1, Math.floor(ratio * rows.length));
+        const plotRatio = Math.max(0, Math.min(1, (ratio - lineLeft / lineWidth) / ((lineRight - lineLeft) / lineWidth)));
+        return Math.round(plotRatio * Math.max(0, rows.length - 1));
+      },
+      clientPoint: (index) => {
+        if (chartKind === "bar") {
+          const fill = chart.querySelector<HTMLElement>(`.dist-bar[data-chart-index="${index}"] .dist-bar-fill`);
+          const rect = fill?.getBoundingClientRect();
+          if (rect) return { x: rect.left + rect.width / 2, y: rect.top };
+        }
+        const lineSvg = chart.querySelector<SVGSVGElement>("svg.distribution-line-chart");
+        return lineSvg ? chartPointToClient(lineSvg, { x: lineX(index) / lineWidth, y: lineY(rows[index]?.[metricKey] || 0) / lineHeight }) : null;
+      },
+      tooltip: (row) => chartTooltipMarkup(row.label || "--", [
+        { label: "调用量", value: `${Math.round(row.requests || 0)} 次调用`, color: "var(--blue-2)" },
+        { label: "Token", value: `${detailedNumber(row.total || 0)} Token`, color: "var(--teal)" },
+        { label: "估算费用", value: moneyDetailed(row.cost || 0), color: "var(--violet)" },
+      ]),
+      ariaText: (row) => `${row.label || "--"}，${detailedNumber(row.requests || 0)} 次调用，${detailedNumber(row.total || 0)} Token，估算费用 ${moneyDetailed(row.cost || 0)}`,
+    });
   };
 
   const renderCost = () => {
@@ -1147,6 +1677,8 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
     // The currency toggle only changes display conversion.
     const content = $("costContent");
     if (!content) return;
+    const chartKind = chartKindFor("cost");
+    syncChartKindControls("cost");
     document.querySelectorAll<HTMLElement>(".currency-mode").forEach((button) => {
       const active = button.dataset.currency === uiState.currency;
       button.classList.toggle("active", active);
@@ -1158,6 +1690,8 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
     const totalCost = Number(cost.total) || 0;
     const hasUsage = rows.some((row) => row.requests || row.total);
     if (!hasUsage) {
+      const previousChart = content.querySelector<HTMLElement>(".cost-chart");
+      clearChartInteraction("cost", previousChart, previousChart);
       content.innerHTML = `<div class="list-empty">当前范围没有可估算费用的 token 用量</div>`;
       return;
     }
@@ -1180,14 +1714,37 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
     const costBuckets = rows.map((row, index) => ({
       label: row.label,
       cost: Number(row.cost) || 0,
+      total: Number(row.total) || 0,
+      requests: Number(row.requests) || 0,
       index,
     }));
     const maxBucket = Math.max(0, ...costBuckets.map((row) => row.cost));
     const peakIndex = costBuckets.reduce((best, row) => row.cost > costBuckets[best].cost ? row.index : best, 0);
     const costBars = costBuckets.map((row) => {
       const height = maxBucket ? Math.max(3, Math.round(row.cost / maxBucket * 100)) : 0;
-      return `<span class="${row.index === peakIndex && row.cost ? "cost-peak" : ""}" style="height:${height}%" title="${esc(row.label)} · ${esc(moneyCompact(row.cost))}"></span>`;
+      return `<span class="${row.index === peakIndex && row.cost ? "cost-peak" : ""}" data-chart-index="${row.index}" style="height:${height}%" aria-label="${esc(row.label)} ${esc(moneyDetailed(row.cost))}"></span>`;
     }).join("");
+    const costLineWidth = 1000;
+    const costLineHeight = 82;
+    const costLineLeft = 12;
+    const costLineRight = 988;
+    const costLineTop = 8;
+    const costLineBottom = 68;
+    const costLineX = (index) => costBuckets.length > 1
+      ? costLineLeft + (costLineRight - costLineLeft) * index / (costBuckets.length - 1)
+      : costLineWidth / 2;
+    const costLineY = (value) => maxBucket
+      ? costLineBottom - (costLineBottom - costLineTop) * (Number(value) || 0) / maxBucket
+      : costLineBottom;
+    const costLinePoints = costBuckets.map((row, index) => [costLineX(index), costLineY(row.cost)]);
+    const costLinePath = smoothPath(costLinePoints);
+    const costLineArea = `${costLinePath} L${costLineX(costBuckets.length - 1)} ${costLineBottom} L${costLineX(0)} ${costLineBottom} Z`;
+    const costLine = `
+      <svg class="cost-line-chart" width="1000" height="82" viewBox="0 0 1000 82" preserveAspectRatio="none" aria-hidden="true">
+        <defs><linearGradient id="costLineArea" x1="0" y1="0" x2="0" y2="1"><stop stop-color="var(--blue-2)" stop-opacity=".25"/><stop offset="1" stop-color="var(--blue-2)" stop-opacity=".02"/></linearGradient></defs>
+        <path d="${costLineArea}" fill="url(#costLineArea)"/>
+        <path data-series="cost" d="${costLinePath}" fill="none" stroke="var(--blue-2)" stroke-width="2.5" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+      </svg>`;
     const firstLabel = costBuckets[0]?.label || "--";
     const lastLabel = costBuckets[costBuckets.length - 1]?.label || "--";
     const fxNote = uiState.currency === "CNY"
@@ -1214,7 +1771,7 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
         </div>
         <div class="cost-trend">
           <h4 class="cost-mini-title">费用走势</h4>
-          <div class="cost-chart" aria-label="费用走势">${costBars}</div>
+          <div class="cost-chart" data-chart-kind="${chartKind}" aria-label="费用走势">${chartKind === "line" ? costLine : costBars}</div>
           <div class="cost-axis"><span>${esc(firstLabel)}</span><span>${esc(lastLabel)}</span></div>
         </div>
       </div>
@@ -1225,12 +1782,104 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
         </svg>
         <span>按 OpenAI 官方美元价和本地 token 估算；ChatGPT/Codex 实际账单与额度以官方为准。${esc(fxNote)}</span>
       </div>`;
+    const costChart = content.querySelector<HTMLElement>(".cost-chart");
+    if (costChart && costBuckets.length) {
+      bindChartInteraction({
+        id: "cost",
+        element: costChart,
+        host: costChart,
+        rows: costBuckets,
+        label: "费用走势时间节点，左右方向键移动，Enter 固定提示",
+        indexFromEvent: (event) => {
+          const target = event.target instanceof Element ? event.target.closest("[data-chart-index]") as HTMLElement | null : null;
+          if (target) return Number(target.dataset.chartIndex);
+          const lineSvg = costChart.querySelector<SVGSVGElement>("svg.cost-line-chart");
+          const rect = (lineSvg || costChart).getBoundingClientRect();
+          const ratio = Math.max(0, Math.min(1, rect.width ? (event.clientX - rect.left) / rect.width : 0));
+          const plotRatio = chartKind === "line"
+            ? Math.max(0, Math.min(1, (ratio - costLineLeft / costLineWidth) / ((costLineRight - costLineLeft) / costLineWidth)))
+            : ratio;
+          return chartKind === "bar"
+            ? Math.min(costBuckets.length - 1, Math.floor(plotRatio * costBuckets.length))
+            : Math.round(plotRatio * Math.max(0, costBuckets.length - 1));
+        },
+        clientPoint: (index, row) => {
+          if (chartKind === "bar") {
+            const bar = costChart.querySelector<HTMLElement>(`[data-chart-index="${index}"]`);
+            const rect = bar?.getBoundingClientRect();
+            if (rect) return { x: rect.left + rect.width / 2, y: rect.top };
+          }
+          const lineSvg = costChart.querySelector<SVGSVGElement>("svg.cost-line-chart");
+          return lineSvg ? chartPointToClient(lineSvg, { x: costLineX(index) / costLineWidth, y: costLineY(row.cost) / costLineHeight }) : null;
+        },
+        tooltip: (row) => chartTooltipMarkup(row.label || "--", [
+          { label: "费用", value: moneyDetailed(row.cost || 0), color: "var(--blue-2)" },
+          { label: "Token", value: `${detailedNumber(row.total || 0)} Token`, color: "var(--teal)" },
+          { label: "调用量", value: `${detailedNumber(row.requests || 0)} 次调用`, color: "var(--violet)" },
+        ]),
+        ariaText: (row) => `${row.label || "--"}，费用 ${moneyDetailed(row.cost || 0)}，${detailedNumber(row.total || 0)} Token，${detailedNumber(row.requests || 0)} 次调用`,
+      });
+    }
   };
 
   const renderSparks = () => {
-    setPath("requestSpark", sparkPath(distributionRows, "requests", 126, 42));
-    setPath("peakSpark", sparkPath(trendRows, "total", 126, 42));
-    setPath("cacheSpark", sparkPath(trendRows, "cached", 126, 36));
+    const requestRows = (distributionRows || []).map((row) => ({ ...row, value: Number(row.requests) || 0 }));
+    const rateRows = (trendRows || []).map((row) => ({
+      ...row,
+      value: (Number(row.total) || 0) / Math.max(1, Number(row.stepMinutes) || 1),
+    }));
+    const cacheRows = (trendRows || []).map((row) => ({
+      ...row,
+      value: row.input ? (Number(row.cached) || 0) / Number(row.input) * 100 : 0,
+    }));
+    const bindSpark = (svgId, pathId, id, rows, height, metricLabel, valueLabel) => {
+      const svg = $(svgId);
+      if (!svg) return;
+      const chartKind = chartKindFor(id);
+      syncChartKindControls(id);
+      svg.dataset.chartKind = chartKind;
+      if (!rows.length) {
+        clearChartInteraction(id, svg, svg.closest(".metric"));
+        svg.innerHTML = "";
+        return;
+      }
+      const values = rows.map((row) => Number(row.value) || 0);
+      const maxValue = Math.max(1, ...values);
+      const width = 126;
+      const pad = 2;
+      const plotWidth = width - pad * 2;
+      const lineX = (index) => rows.length > 1 ? pad + plotWidth * index / (rows.length - 1) : width / 2;
+      const slotWidth = plotWidth / Math.max(1, rows.length);
+      const barWidth = Math.max(1, Math.min(10, slotWidth * .64));
+      const barX = (index) => pad + slotWidth * (index + .5);
+      const y = (value) => height - pad - (height - pad * 2) * value / maxValue;
+      if (chartKind === "bar") {
+        svg.innerHTML = values.map((value, index) => {
+          const topY = y(value);
+          return `<rect data-chart-index="${index}" x="${(barX(index) - barWidth / 2).toFixed(2)}" y="${topY.toFixed(2)}" width="${barWidth.toFixed(2)}" height="${Math.max(0, height - pad - topY).toFixed(2)}" rx="${Math.min(2, barWidth / 2).toFixed(2)}" fill="var(--blue-2)" opacity=".82"/>`;
+        }).join("");
+      } else {
+        svg.innerHTML = `<path id="${pathId}" data-series="${id}" d="${sparkPath(rows, "value", width, height)}" fill="none" stroke="var(--blue-2)" stroke-width="${height === 36 ? 2 : 2.2}" stroke-linecap="round"/>`;
+      }
+      bindChartInteraction({
+        id,
+        element: svg,
+        host: svg.closest(".metric"),
+        rows,
+        label: `${metricLabel}时间节点，左右方向键移动，Enter 固定提示`,
+        xStart: (chartKind === "bar" ? barX(0) : lineX(0)) / width,
+        xEnd: (chartKind === "bar" ? barX(rows.length - 1) : lineX(rows.length - 1)) / width,
+        point: (index) => ({
+          x: (chartKind === "bar" ? barX(index) : lineX(index)) / width,
+          y: y(values[index]) / height,
+        }),
+        tooltip: (row) => chartTooltipMarkup(row.label || "--", [{ label: metricLabel, value: valueLabel(row.value) }]),
+        ariaText: (row) => `${row.label || "--"}，${metricLabel} ${valueLabel(row.value)}`,
+      });
+    };
+    bindSpark("requestSparkChart", "requestSpark", "requests", requestRows, 42, "调用量", (value) => `${detailedNumber(value)} 次调用`);
+    bindSpark("peakSparkChart", "peakSpark", "peak-rate", rateRows, 42, "Token 速率", (value) => `${detailedNumber(value)} TPM`);
+    bindSpark("cacheSparkChart", "cacheSpark", "cache-hit", cacheRows, 36, "缓存命中率", (value) => `${Number(value || 0).toFixed(1)}%`);
   };
 
   const renderAll = () => {
@@ -1273,6 +1922,7 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
     });
     if (!options.preserveUiState) {
       uiState.sessionsExpanded = false;
+      uiState.expandedSessionKey = "";
       uiState.modelsExpanded = false;
     }
     const range = rangeForPreset(preset);
@@ -1320,6 +1970,19 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
   }
   document.querySelectorAll<HTMLElement>(".period-btn").forEach((button) => {
     button.addEventListener("click", () => applyRange(button.dataset.range || "today"));
+  });
+  document.querySelectorAll<HTMLElement>(".chart-kind").forEach((button) => {
+    button.addEventListener("click", () => {
+      const target = button.dataset.chartTarget || "";
+      const kind: ChartKind = button.dataset.chartKind === "bar" ? "bar" : "line";
+      if (!target || !(target in uiState.chartKinds)) return;
+      uiState.chartKinds[target] = kind;
+      syncChartKindControls(target);
+      if (target === "trend") renderChart();
+      else if (target === "distribution") renderDistribution();
+      else if (target === "cost") renderCost();
+      else renderSparks();
+    });
   });
   document.querySelectorAll<HTMLElement>(".trend-scale").forEach((button) => {
     button.addEventListener("click", () => {
@@ -1396,6 +2059,7 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
     // Replace only the in-memory dataset. Keeping the document and UI state
     // alive avoids the visible flash caused by a full location.reload().
     data = nextData;
+    legacySessionRenderEpoch += 1;
     window.CODEXSCOPE_DATA = nextData;
     window.CODEXSCOPE_RAW_DATA = undefined;
     rawDataPath = data.rawDataPath || "data.raw.js";
@@ -1408,6 +2072,7 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
     sessionsCatalogCache = null;
     sessionsCatalogRowsCache = null;
     recordsCache = null;
+    completionRecordsCache = null;
     ttfbRecordsCache = null;
     failureRecordsCache = null;
     rawDataPromise = null;
@@ -1426,6 +2091,22 @@ type DashboardTabId = "overview" | "quota" | "token" | "session" | "model" | "ra
   $("toggleSessions")?.addEventListener("click", () => {
     uiState.sessionsExpanded = !uiState.sessionsExpanded;
     renderSessions();
+  });
+
+  const toggleSessionDetail = (sessionKey) => {
+    uiState.expandedSessionKey = uiState.expandedSessionKey === sessionKey ? "" : sessionKey;
+    renderSessions();
+  };
+  $("sessionList")?.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target.closest<HTMLElement>(".session-row[data-session-key]") : null;
+    if (target?.dataset.sessionKey) toggleSessionDetail(target.dataset.sessionKey);
+  });
+  $("sessionList")?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const target = event.target instanceof Element ? event.target.closest<HTMLElement>(".session-row[data-session-key]") : null;
+    if (!target?.dataset.sessionKey) return;
+    event.preventDefault();
+    toggleSessionDetail(target.dataset.sessionKey);
   });
 
   $("toggleModels")?.addEventListener("click", () => {

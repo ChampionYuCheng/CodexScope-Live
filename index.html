@@ -163,6 +163,10 @@
               <div id="chartMeta" class="forecast">累计 --</div>
             </div>
             <div class="chart-actions">
+              <div class="chart-kind-toggle" role="group" aria-label="Token 图表类型">
+                <button class="chart-kind active" type="button" data-chart-target="trend" data-chart-kind="line" aria-pressed="true">折线</button>
+                <button class="chart-kind" type="button" data-chart-target="trend" data-chart-kind="bar" aria-pressed="false">柱状</button>
+              </div>
               <div class="trend-toggle" role="group" aria-label="趋势统计方式">
                 <button class="trend-mode active" type="button" data-trend-mode="cumulative">累计</button>
                 <button class="trend-mode" type="button" data-trend-mode="interval">分时</button>
@@ -245,8 +249,12 @@
           </article>
           <article class="metric">
             <h3>调用量</h3>
+            <div class="chart-kind-toggle metric-chart-toggle" role="group" aria-label="调用量图表类型">
+              <button class="chart-kind active" type="button" data-chart-target="requests" data-chart-kind="line" aria-pressed="true">折线</button>
+              <button class="chart-kind" type="button" data-chart-target="requests" data-chart-kind="bar" aria-pressed="false">柱状</button>
+            </div>
             <div id="requestCount" class="metric-value">--</div>
-            <svg class="spark" viewBox="0 0 126 42" aria-hidden="true">
+            <svg id="requestSparkChart" class="spark" width="126" height="42" viewBox="0 0 126 42" aria-hidden="true">
               <path id="requestSpark" fill="none" stroke="var(--blue-2)" stroke-width="2.2" stroke-linecap="round"/>
             </svg>
             <div class="metric-footer">
@@ -256,8 +264,12 @@
           </article>
           <article class="metric">
             <h3>峰值速率</h3>
+            <div class="chart-kind-toggle metric-chart-toggle" role="group" aria-label="峰值速率图表类型">
+              <button class="chart-kind active" type="button" data-chart-target="peak-rate" data-chart-kind="line" aria-pressed="true">折线</button>
+              <button class="chart-kind" type="button" data-chart-target="peak-rate" data-chart-kind="bar" aria-pressed="false">柱状</button>
+            </div>
             <div><span id="peakRate" class="metric-value">--</span><span class="metric-unit">TPM</span></div>
-            <svg class="spark" viewBox="0 0 126 42" aria-hidden="true">
+            <svg id="peakSparkChart" class="spark" width="126" height="42" viewBox="0 0 126 42" aria-hidden="true">
               <path id="peakSpark" fill="none" stroke="var(--blue-2)" stroke-width="2.2" stroke-linecap="round"/>
             </svg>
             <div class="metric-footer">
@@ -266,9 +278,13 @@
           </article>
           <article class="metric">
             <h3>缓存命中率</h3>
+            <div class="chart-kind-toggle metric-chart-toggle" role="group" aria-label="缓存命中率图表类型">
+              <button class="chart-kind active" type="button" data-chart-target="cache-hit" data-chart-kind="line" aria-pressed="true">折线</button>
+              <button class="chart-kind" type="button" data-chart-target="cache-hit" data-chart-kind="bar" aria-pressed="false">柱状</button>
+            </div>
             <div id="cacheHit" class="metric-value">--</div>
             <div class="delta">缓存<span>输入 token</span></div>
-            <svg class="spark small" viewBox="0 0 126 36" aria-hidden="true">
+            <svg id="cacheSparkChart" class="spark small" width="126" height="36" viewBox="0 0 126 36" aria-hidden="true">
               <path id="cacheSpark" fill="none" stroke="var(--blue-2)" stroke-width="2" stroke-linecap="round"/>
             </svg>
           </article>
@@ -287,6 +303,10 @@
               <div id="rangeSummary" class="forecast">今天</div>
             </div>
             <div class="dist-toolbar">
+              <div class="chart-kind-toggle" role="group" aria-label="速率图表类型">
+                <button class="chart-kind" type="button" data-chart-target="distribution" data-chart-kind="line" aria-pressed="false">折线</button>
+                <button class="chart-kind active" type="button" data-chart-target="distribution" data-chart-kind="bar" aria-pressed="true">柱状</button>
+              </div>
               <div class="dist-toggle" role="group" aria-label="分布指标">
                 <button class="dist-mode active" type="button" data-dist-mode="calls">调用</button>
                 <button class="dist-mode" type="button" data-dist-mode="tokens">Token</button>
@@ -360,6 +380,10 @@
                     </span>
                   </span>
                 </span>
+                <div class="chart-kind-toggle" role="group" aria-label="费用走势图表类型">
+                  <button class="chart-kind" type="button" data-chart-target="cost" data-chart-kind="line" aria-pressed="false">折线</button>
+                  <button class="chart-kind active" type="button" data-chart-target="cost" data-chart-kind="bar" aria-pressed="true">柱状</button>
+                </div>
                 <div class="currency-toggle" role="group" aria-label="费用币种">
                   <button class="currency-mode active" type="button" data-currency="USD">USD</button>
                   <button class="currency-mode" type="button" data-currency="CNY">CNY</button>
