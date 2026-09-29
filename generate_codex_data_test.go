@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -164,7 +165,12 @@ func TestOutputHasCurrentSchema(t *testing.T) {
 	current := filepath.Join(dir, "current.js")
 	raw := filepath.Join(dir, "current.raw.js")
 	legacy := filepath.Join(dir, "legacy.js")
-	if err := os.WriteFile(current, []byte(`window.CODEXSCOPE_DATA = {"schemaVersion":2,"rawDataPath":"data.raw.js","pricingRules":[],"views":{}};`), 0o644); err != nil {
+	if err := writeJSPayload(current, "CODEXSCOPE_DATA", map[string]any{
+		"schemaVersion": 2,
+		"rawDataPath":   "data.raw.js",
+		"pricingRules":  pricingRulesPayload(),
+		"views":         map[string]any{},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(raw, []byte(`window.CODEXSCOPE_RAW_DATA = {"schemaVersion":2,"rawSchemaVersion":1,"catalog":{},"recordBase":1,"recordsV2":[]};`), 0o644); err != nil {
@@ -187,6 +193,37 @@ func TestOutputHasCurrentSchema(t *testing.T) {
 	}
 	if outputHasCurrentSchema(legacy) {
 		t.Fatal("legacy schema should not be treated as fresh")
+	}
+	stalePricing := filepath.Join(dir, "stale-pricing.js")
+	if err := writeJSPayload(stalePricing, "CODEXSCOPE_DATA", map[string]any{
+		"schemaVersion": 2,
+		"rawDataPath":   "data.raw.js",
+		"pricingRules":  []PricingRuleExport{},
+		"views":         map[string]any{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if outputHasCurrentSchema(stalePricing) {
+		t.Fatal("payload with stale pricing rules should be regenerated")
+	}
+	stalePricingRaw := filepath.Join(dir, "data.raw.js")
+	if err := writeJSPayload(stalePricingRaw, "CODEXSCOPE_RAW_DATA", map[string]any{
+		"schemaVersion":    2,
+		"rawSchemaVersion": 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	freshAt := time.Now().Add(time.Hour)
+	if err := os.Chtimes(stalePricing, freshAt, freshAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(stalePricingRaw, freshAt, freshAt); err != nil {
+		t.Fatal(err)
+	}
+	input := sessionFileCandidate{path: filepath.Join(dir, "session.jsonl"), mtimeNs: time.Now().UnixNano(), size: 1}
+	cache := map[string]FileCache{input.path: {MtimeNs: input.mtimeNs, Size: input.size}}
+	if outputIsFresh(stalePricing, stalePricingRaw, []sessionFileCandidate{input}, cache) {
+		t.Fatal("fresh session cache must not preserve a stale pricing catalog")
 	}
 	if rawOutputHasCurrentSchema(legacy) {
 		t.Fatal("legacy raw schema should not be treated as fresh")
@@ -259,6 +296,44 @@ func TestPricingRulesPayloadFeedsRuntimePricing(t *testing.T) {
 	}
 }
 
+func TestNewModelPricingMatchesStandardShortContextRates(t *testing.T) {
+	tests := []struct {
+		model                 string
+		input, cached, output float64
+		wantTotal             float64
+	}{
+		{model: "gpt-6-astra", input: 10, cached: 1, output: 50, wantTotal: 27.75},
+		{model: "gpt-6-sol", input: 2, cached: 0.2, output: 10, wantTotal: 5.55},
+		{model: "gpt-6-luna", input: 0.1, cached: 0.01, output: 0.5, wantTotal: 0.2775},
+		{model: "gpt-5.6-sol", input: 4, cached: 0.4, output: 20, wantTotal: 11.1},
+		{model: "gpt-5.6-terra", input: 2, cached: 0.2, output: 12, wantTotal: 6.35},
+		{model: "gpt-5.6-luna", input: 0.2, cached: 0.02, output: 1.2, wantTotal: 0.635},
+	}
+	usage := Usage{Input: 1_000_000, Cached: 250_000, Output: 400_000, Reasoning: 100_000}
+	exported := pricingRulesPayload()
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			rule := pricingForModel(tt.model)
+			if rule == nil || rule.input != tt.input || rule.cached != tt.cached || rule.output != tt.output {
+				t.Fatalf("unexpected pricing rule: got %#v", rule)
+			}
+			cost := priceUsage(tt.model, usage)
+			if math.Abs(cost.Total-tt.wantTotal) > 1e-9 {
+				t.Fatalf("unexpected estimated cost: got %.10f, want %.10f", cost.Total, tt.wantTotal)
+			}
+			for _, row := range exported {
+				if row.Label == tt.model {
+					if row.Input != tt.input || row.Cached != tt.cached || row.Output != tt.output {
+						t.Fatalf("exported runtime pricing differs from rule: %#v", row)
+					}
+					return
+				}
+			}
+			t.Fatalf("pricing payload does not export %s", tt.model)
+		})
+	}
+}
+
 func TestWriteJSPayloadCreatesParentDirectory(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "nested", "data.js")
 	if err := writeJSPayload(out, "CODEXSCOPE_DATA", map[string]any{"schemaVersion": 2}); err != nil {
@@ -307,7 +382,12 @@ func TestOutputIsFreshRejectsOutputsOlderThanGeneratorSources(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "data.js")
 	rawOut := filepath.Join(dir, "data.raw.js")
-	if err := os.WriteFile(out, []byte(`window.CODEXSCOPE_DATA = {"schemaVersion":2,"rawDataPath":"data.raw.js","pricingRules":[],"views":{}};`), 0o644); err != nil {
+	if err := writeJSPayload(out, "CODEXSCOPE_DATA", map[string]any{
+		"schemaVersion": 2,
+		"rawDataPath":   "data.raw.js",
+		"pricingRules":  pricingRulesPayload(),
+		"views":         map[string]any{},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(rawOut, []byte(`window.CODEXSCOPE_RAW_DATA = {"schemaVersion":2,"rawSchemaVersion":1,"catalog":{},"recordBase":1,"recordsV2":[]};`), 0o644); err != nil {

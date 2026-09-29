@@ -633,7 +633,11 @@ func outputHasCurrentSchema(outPath string) bool {
 }
 
 func outputHasCurrentSchemaForRawPath(outPath string, rawDataPath string) bool {
-	needles := []string{`"schemaVersion":2`, `"rawDataPath"`, `"views"`, `"pricingRules"`}
+	pricingRules, err := json.Marshal(pricingRulesPayload())
+	if err != nil {
+		return false
+	}
+	needles := []string{`"schemaVersion":2`, `"rawDataPath"`, `"views"`, `"pricingRules":` + string(pricingRules)}
 	if rawDataPath != "" {
 		quoted, err := json.Marshal(rawDataPath)
 		if err != nil {
@@ -1113,7 +1117,14 @@ func outputIsFresh(outPath string, rawOutPath string, files []sessionFileCandida
 	return true
 }
 
+// ponytail: Estimate Standard short-context rates; add context/service-tier data only if Codex logs expose it.
 var modelPricingUSDPerM = []pricingRule{
+	{label: "gpt-6-astra", patterns: []string{"gpt-6-astra", "gpt_6_astra", "gpt 6 astra"}, input: 10.00, cached: 1.00, output: 50.00},
+	{label: "gpt-6-sol", patterns: []string{"gpt-6-sol", "gpt_6_sol", "gpt 6 sol"}, input: 2.00, cached: 0.20, output: 10.00},
+	{label: "gpt-6-luna", patterns: []string{"gpt-6-luna", "gpt_6_luna", "gpt 6 luna"}, input: 0.10, cached: 0.01, output: 0.50},
+	{label: "gpt-5.6-sol", patterns: []string{"gpt-5.6-sol", "gpt_5.6_sol", "gpt 5.6 sol"}, input: 4.00, cached: 0.40, output: 20.00},
+	{label: "gpt-5.6-terra", patterns: []string{"gpt-5.6-terra", "gpt_5.6_terra", "gpt 5.6 terra"}, input: 2.00, cached: 0.20, output: 12.00},
+	{label: "gpt-5.6-luna", patterns: []string{"gpt-5.6-luna", "gpt_5.6_luna", "gpt 5.6 luna"}, input: 0.20, cached: 0.02, output: 1.20},
 	{label: "gpt-5.5", patterns: []string{"gpt-5.5"}, input: 5.00, cached: 0.50, output: 30.00},
 	{label: "gpt-5.4 mini", patterns: []string{"gpt-5.4-mini", "gpt_5.4_mini", "gpt 5.4 mini"}, input: 0.75, cached: 0.075, output: 4.50},
 	{label: "gpt-5.4", patterns: []string{"gpt-5.4"}, input: 2.50, cached: 0.25, output: 15.00},

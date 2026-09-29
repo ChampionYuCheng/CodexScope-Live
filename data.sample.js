@@ -3,6 +3,12 @@ window.CODEXSCOPE_SAMPLE_DATA = {
   generatedAt: "2026-05-09 00:16:00",
   windowDays: 30,
   pricingRules: [
+    { label: "gpt-6-astra", patterns: ["gpt-6-astra", "gpt_6_astra", "gpt 6 astra"], input: 10.00, cached: 1.00, output: 50.00 },
+    { label: "gpt-6-sol", patterns: ["gpt-6-sol", "gpt_6_sol", "gpt 6 sol"], input: 2.00, cached: 0.20, output: 10.00 },
+    { label: "gpt-6-luna", patterns: ["gpt-6-luna", "gpt_6_luna", "gpt 6 luna"], input: 0.10, cached: 0.01, output: 0.50 },
+    { label: "gpt-5.6-sol", patterns: ["gpt-5.6-sol", "gpt_5.6_sol", "gpt 5.6 sol"], input: 4.00, cached: 0.40, output: 20.00 },
+    { label: "gpt-5.6-terra", patterns: ["gpt-5.6-terra", "gpt_5.6_terra", "gpt 5.6 terra"], input: 2.00, cached: 0.20, output: 12.00 },
+    { label: "gpt-5.6-luna", patterns: ["gpt-5.6-luna", "gpt_5.6_luna", "gpt 5.6 luna"], input: 0.20, cached: 0.02, output: 1.20 },
     { label: "gpt-5.5", patterns: ["gpt-5.5"], input: 5.00, cached: 0.50, output: 30.00 },
     { label: "gpt-5.4 mini", patterns: ["gpt-5.4-mini", "gpt_5.4_mini", "gpt 5.4 mini"], input: 0.75, cached: 0.075, output: 4.50 },
     { label: "gpt-5.4", patterns: ["gpt-5.4"], input: 2.50, cached: 0.25, output: 15.00 },

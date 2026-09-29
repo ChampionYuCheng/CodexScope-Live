@@ -3,9 +3,14 @@ const path = require("node:path");
 const { chromium } = require("playwright");
 
 const pageUrl = "file://" + path.resolve(__dirname, "index.html").replace(/\\/g, "/");
+const fixtureClock = new Date();
+fixtureClock.setHours(10, 30, 0, 0);
+const fixtureDay = [fixtureClock.getFullYear(), String(fixtureClock.getMonth() + 1).padStart(2, "0"), String(fixtureClock.getDate()).padStart(2, "0")].join("-");
+const fixtureNow = fixtureClock.getTime();
+const fixtureTimestamp = (minute, second = 0) => `${fixtureDay} 10:${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}`;
 
 function mixedSessionFixture() {
-  const now = new Date("2026-08-31T10:30:00+08:00").getTime();
+  const now = fixtureNow;
   const view = {
     label: "今天",
     summary: {
@@ -62,7 +67,7 @@ function mixedSessionFixture() {
   };
   return {
     schemaVersion: 2,
-    generatedAt: "2026-08-31 10:30:00",
+    generatedAt: fixtureTimestamp(30),
     availableRange: { start: now - 3600000, end: now },
     views: { "24h": view, today: view, "7": view, "30": view, history: view },
     limits: { planType: "pro", primaryRemaining: 75, primaryUsed: 25 },
@@ -84,7 +89,7 @@ function legacyDuplicateSessionFixture() {
 }
 
 function mixedRawFixture() {
-  const recordBase = new Date("2026-08-31T10:00:00+08:00").getTime();
+  const recordBase = fixtureNow - 30 * 60 * 1000;
   return {
     schemaVersion: 2,
     rawSchemaVersion: 1,
@@ -190,10 +195,10 @@ function assertAligned(alignment, label) {
     }
 
     await page.locator(".period-btn[data-range='custom']").click();
-    await page.locator("#startDate").fill("2026-08-31");
-    await page.locator("#endDate").fill("2026-08-31");
+    await page.locator("#startDate").fill(fixtureDay);
+    await page.locator("#endDate").fill(fixtureDay);
     await page.locator("#endDate").dispatchEvent("change");
-    await page.waitForFunction(() => (document.querySelector("#rangeSummary")?.textContent || "").includes("2026-08-31"));
+    await page.waitForFunction((day) => (document.querySelector("#rangeSummary")?.textContent || "").includes(day), fixtureDay);
     const customRow = page.locator(".session-row[data-session-index='0']");
     const customRowText = await customRow.innerText();
     assert.equal(customRowText.includes("gpt-5.6-terra"), true, "自定义区间应显示同一会话的最新 Terra 模型");
@@ -204,17 +209,17 @@ function assertAligned(alignment, label) {
       assert.equal(customDetailText.includes(expected), true, "自定义区间会话详情缺少 " + expected);
     }
 
-    await page.evaluate(async () => {
+    await page.evaluate(async (generatedAt) => {
       window.__setRawFixture({ ...window.CODEXSCOPE_RAW_DATA, recordsV2: [], completionRecordsV2: [], ttfbRecordsV2: [], failureRecordsV2: [] });
       await window.CODEXSCOPE_APPLY_DATA({
         schemaVersion: 2,
-        generatedAt: "2026-08-31 10:32:00",
+        generatedAt,
         rawDataPath: "missing-data.raw.js",
         availableRange: { start: Date.now() - 3600000, end: Date.now() },
         views: {},
         limits: {},
       });
-    });
+    }, fixtureTimestamp(32));
     const clearedState = await page.evaluate(() => {
       const trend = document.querySelector("#trendChart");
       const distribution = document.querySelector("#distributionChart");
@@ -244,11 +249,11 @@ function assertAligned(alignment, label) {
     await duplicateRows.nth(0).press("Enter");
     assert.equal(await duplicateRows.nth(0).getAttribute("aria-expanded"), "true", "第一个同名会话应独立展开");
     assert.equal(await duplicateRows.nth(1).getAttribute("aria-expanded"), "false", "第二个同名会话不得被同名键连带展开");
-    await page.evaluate(async () => {
+    await page.evaluate(async (generatedAt) => {
       const next = structuredClone(window.CODEXSCOPE_DATA);
-      next.generatedAt = "2026-08-31 10:33:00";
+      next.generatedAt = generatedAt;
       await window.CODEXSCOPE_APPLY_DATA(next);
-    });
+    }, fixtureTimestamp(33));
     assert.equal(await page.locator(".session-row[aria-expanded='true']").count(), 0, "旧导出刷新后不得按名称恢复展开态");
     await page.locator(".period-btn[data-range='today']").click();
     await page.waitForFunction(() => (document.querySelector("#rangeSummary")?.textContent || "").includes("今天"));
@@ -326,12 +331,12 @@ function assertAligned(alignment, label) {
     assert.equal(await trendChart.getAttribute("aria-valuenow"), "0", "方向键应移动 Token 图节点");
     await trendChart.press("Enter");
 
-    await page.evaluate(async () => {
+    await page.evaluate(async (generatedAt) => {
       const next = structuredClone(window.CODEXSCOPE_DATA);
-      next.generatedAt = "2026-08-31 10:31:00";
+      next.generatedAt = generatedAt;
       next.views.today.summary.requestsLabel = "3";
       await window.CODEXSCOPE_APPLY_DATA(next);
-    });
+    }, fixtureTimestamp(31));
     assert.equal(await trendChart.getAttribute("aria-valuenow"), "0", "局部数据刷新后应保留选中节点");
     assert.equal(await trendChart.getAttribute("data-chart-pinned"), "true", "局部数据刷新后应保留固定提示");
 
@@ -366,11 +371,11 @@ function assertAligned(alignment, label) {
       assert.equal(await page.locator(`${selector} path[data-series='${target}']`).count(), 1, `${target} 折线图应渲染趋势线`);
     }
     await page.locator(".chart-kind[data-chart-target='requests'][data-chart-kind='bar']").click();
-    await page.evaluate(async () => {
+    await page.evaluate(async (generatedAt) => {
       const next = structuredClone(window.CODEXSCOPE_DATA);
-      next.generatedAt = "2026-08-31 10:31:30";
+      next.generatedAt = generatedAt;
       await window.CODEXSCOPE_APPLY_DATA(next);
-    });
+    }, fixtureTimestamp(31, 30));
     assert.equal(await page.locator("#requestSparkChart").getAttribute("data-chart-kind"), "bar", "局部数据刷新后应保留总览图表类型");
     assert.equal(await page.locator("#peakSparkChart").getAttribute("data-chart-kind"), "line", "各总览图表类型必须相互独立");
 
@@ -423,19 +428,19 @@ function assertAligned(alignment, label) {
     assertAligned(await elementTopAlignment(page, ".cost-chart [data-chart-index='1']", "cost"), "费用柱状图");
     assert.equal(await page.locator(".cost-chart").getAttribute("aria-valuetext"), "10:20，费用 $0.004，1,549 Token，1 次调用", "费用 aria 详细值应保留精度");
 
-    await page.evaluate(async () => {
+    await page.evaluate(async (day) => {
       window.__setRawFixture(undefined);
       for (let index = 0; index < 3; index += 1) {
         await window.CODEXSCOPE_APPLY_DATA({
           schemaVersion: 2,
-          generatedAt: `2026-08-31 10:34:0${index}`,
+          generatedAt: `${day} 10:34:0${index}`,
           rawDataPath: "missing-sidecar.raw.js",
           availableRange: { start: Date.now() - 3600000, end: Date.now() },
           views: {},
           limits: {},
         });
       }
-    });
+    }, fixtureDay);
     await page.waitForTimeout(100);
     assert.equal(await page.locator("script[src*='missing-sidecar.raw.js']").count(), 0, "sidecar load 失败后 script 节点必须移除");
     assert.deepEqual(pageErrors, [], "页面脚本异常：" + pageErrors.join(" | "));

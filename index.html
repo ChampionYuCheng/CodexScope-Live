@@ -362,12 +362,12 @@
             <div class="panel-title cost-title">
               <h3>费用统计</h3>
               <div class="cost-actions">
-                <span class="cost-source">官方美元价
+                <span class="cost-source">API 标准价
                   <span class="cost-help-wrap">
                     <button id="costHelp" class="cost-help" type="button" aria-label="费用估算说明" aria-expanded="false" aria-describedby="costHelpTip">i</button>
                     <span id="costHelpTip" class="cost-popover" role="tooltip">
-                      <b>官方价格表 · USD / 1M tokens</b>
-                      <table class="price-table" aria-label="官方美元价格表">
+                      <b>OpenAI API 标准价 · USD / 1M tokens</b>
+                      <table class="price-table" aria-label="OpenAI API 标准价格表">
                         <thead>
                           <tr><th>模型</th><th>输入</th><th>缓存</th><th>输出</th></tr>
                         </thead>
@@ -375,8 +375,8 @@
                           <tr><td colspan="4">等待价格表</td></tr>
                         </tbody>
                       </table>
-                      <span class="price-note">推理 token 按输出价估算；这里只读本地日志，实际账单和套餐额度以官方为准。</span>
-                      <a href="https://openai.com/api/pricing/" target="_blank" rel="noreferrer">打开 OpenAI 价格页</a>
+                      <span class="price-note">按 2026-09-28 标准短上下文价格估算（GPT-5.6 Sol 优惠价至少至 2026-11-21），推理 token 按输出价计算；未包含长上下文、缓存写入及 Batch/Flex/Fast 档差异。实际 Codex 账单和额度以官方为准。</span>
+                      <a href="https://developers.openai.com/api/docs/pricing" target="_blank" rel="noreferrer">打开 OpenAI 价格页</a>
                     </span>
                   </span>
                 </span>

@@ -63,7 +63,7 @@ CodexScope Live 读取本机 Codex JSONL 会话日志中已经存在的用量元
 
 ### Windows 免安装实时面板（推荐）
 
-普通用户请从 [GitHub Releases](https://github.com/ChampionYuCheng/CodexScope-Live/releases) 下载 `CodexScope-Live-v0.4.0-Windows-x64.zip` 及其同名 `.sha256` 文件，不要下载 GitHub 自动生成的 `Source code` 压缩包。
+普通用户请从 [GitHub Releases](https://github.com/ChampionYuCheng/CodexScope-Live/releases) 下载 `CodexScope-Live-v0.5.0-Windows-x64.zip` 及其同名 `.sha256` 文件，不要下载 GitHub 自动生成的 `Source code` 压缩包。
 
 1. 解压整个 ZIP。
 2. 双击 `CodexScope-Live.exe`。
@@ -77,8 +77,8 @@ CodexScope Live 读取本机 Codex JSONL 会话日志中已经存在的用量元
 Windows SmartScreen 可能因为程序暂未进行代码签名而显示“未知发布者”。请确认下载地址是本仓库的 Release，并在运行前核对 SHA256：
 
 ~~~powershell
-Get-FileHash .\CodexScope-Live-v0.4.0-Windows-x64.zip -Algorithm SHA256
-Get-Content .\CodexScope-Live-v0.4.0-Windows-x64.zip.sha256
+Get-FileHash .\CodexScope-Live-v0.5.0-Windows-x64.zip -Algorithm SHA256
+Get-Content .\CodexScope-Live-v0.5.0-Windows-x64.zip.sha256
 ~~~
 
 两处哈希值必须完全一致。
@@ -193,7 +193,7 @@ npm.cmd run release:windows
 npm.cmd run check:release:windows
 ~~~
 
-产物位于 `dist/CodexScope-Live-v0.4.0-Windows-x64.zip`，同时生成同名 `.sha256` 校验文件。验证脚本会先把最终 ZIP 解压到临时目录，再检查两个 EXE 都是 Windows x64、主程序采用 GUI 子系统、校验 SHA256、让包内生成器解析一份真实 JSONL 测试数据、确认私有运行数据没有写入程序目录、验证跨域网页无法加载 `data.js`，并实际测试带私有令牌的退出流程。原有 `npm run release:local` 继续保留给旧的跨平台静态包流程。
+产物位于 `dist/CodexScope-Live-v0.5.0-Windows-x64.zip`，同时生成同名 `.sha256` 校验文件。验证脚本会先把最终 ZIP 解压到临时目录，再检查两个 EXE 都是 Windows x64、主程序采用 GUI 子系统、校验 SHA256、让包内生成器解析一份真实 JSONL 测试数据、确认私有运行数据没有写入程序目录、验证跨域网页无法加载 `data.js`，并实际测试带私有令牌的退出流程。原有 `npm run release:local` 继续保留给旧的跨平台静态包流程。
 
 ## 数据流
 
@@ -208,7 +208,7 @@ npm.cmd run check:release:windows
 
 ## 费用估算说明
 
-费用卡片只是估算，不是官方账单。它使用本地 Token 数量和生成器导出的模型价格规则计算。USD 是原始计算币种，CNY 仅用于展示换算。
+费用卡片只是估算，不是官方账单。它使用本地 Token 数量和生成器导出的模型价格规则计算。USD 是原始计算币种，CNY 仅用于展示换算。内置价格表采用 OpenAI 公布的 Standard 短上下文 API 价格（每百万 Token），核对日期为 2026-09-28，覆盖 GPT-6 Astra/Sol/Luna 与 GPT-5.6 Sol/Terra/Luna；OpenAI 当前列出的 GPT-5.6 Sol 优惠价格至少适用至 2026-11-21。本地 Codex 日志未提供可用于判断计费上下文长度、缓存写入 Token 或服务档位的信息，因此估算不含这些差异；推理 Token 按对应模型的输出价格计算。价格可能变化，请查看 [OpenAI 官方价格页](https://developers.openai.com/api/docs/pricing)。
 
 网络可用时，面板会通过 Frankfurter API 获取 USD/CNY 汇率，并使用 ECB 数据源；请求失败时会使用内置参考汇率，并在页面标记为离线回退。实际 ChatGPT 或 Codex 的账单、余额和额度状态，请以官方账号或账单页面为准。
 

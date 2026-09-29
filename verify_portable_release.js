@@ -79,7 +79,7 @@ function writeSessionFixture(sessionsRoot) {
   const timestamp = new Date().toISOString();
   const lines = [
     { type: "session_meta", payload: { id: "portable-fixture-session", cwd: "D:/portable-fixture-marker" } },
-    { type: "turn_context", payload: { model: "gpt-portable-fixture", cwd: "D:/portable-fixture-marker" } },
+    { type: "turn_context", payload: { model: "gpt-6-luna", cwd: "D:/portable-fixture-marker" } },
     {
       timestamp,
       type: "event_msg",
@@ -87,16 +87,18 @@ function writeSessionFixture(sessionsRoot) {
         type: "token_count",
         info: {
           last_token_usage: {
-            input_tokens: 1234,
-            cached_input_tokens: 234,
-            output_tokens: 56,
-            reasoning_output_tokens: 7,
+            input_tokens: 10000000,
+            cached_input_tokens: 2000000,
+            output_tokens: 1000000,
+            reasoning_output_tokens: 100000,
+            total_tokens: 11000000,
           },
           total_token_usage: {
-            input_tokens: 1234,
-            cached_input_tokens: 234,
-            output_tokens: 56,
-            reasoning_output_tokens: 7,
+            input_tokens: 10000000,
+            cached_input_tokens: 2000000,
+            output_tokens: 1000000,
+            reasoning_output_tokens: 100000,
+            total_tokens: 11000000,
           },
         },
       },
@@ -232,8 +234,9 @@ async function main() {
     const generatedData = await waitForResponse(new URL("data.js", tokenBaseUrl));
     const generatedSource = await generatedData.text();
     assert.match(generatedSource, /portable-fixture-marker/);
-    assert.match(generatedSource, /gpt-portable-fixture/);
-    assert.match(generatedSource, /"inputTokens":1234/);
+    assert.match(generatedSource, /gpt-6-luna/);
+    assert.match(generatedSource, /"inputTokens":10000000/);
+    assert.match(generatedSource, /"label":"gpt-6-luna".*"input":0\.1.*"cached":0\.01.*"output":0\.5/);
     assert.ok(isFile(path.join(dataRoot, "data.js")), "generated data must use the private data directory");
     assert.ok(isFile(path.join(dataRoot, "data.raw.js")), "raw data must use the private data directory");
     assert.equal(sha256(path.join(packageRoot, "data.js")), placeholderHash, "install directory was mutated");
@@ -252,6 +255,16 @@ async function main() {
     );
     assert.deepEqual(pageErrors, [], `packaged dashboard page errors: ${pageErrors.join("; ")}`);
     assert.equal(await appPage.locator("#exitApp").isVisible(), true, "packaged dashboard must expose a friendly exit control");
+    await appPage.locator("#tab-model").click();
+    const modelPanel = appPage.locator("#tab-model-panel");
+    await modelPanel.waitFor({ state: "visible" });
+    await modelPanel.locator('.currency-mode[data-currency="USD"]').click();
+    const gpt6Cost = appPage.locator('#modelList .model-row').filter({ hasText: "gpt-6-luna" }).locator(".model-cost");
+    await gpt6Cost.waitFor({ state: "visible" });
+    assert.equal((await gpt6Cost.textContent()).trim(), "$1.32", "GPT-6 Luna model cost must use the published price mapping");
+    await modelPanel.locator("#costHelp").click();
+    const gpt6PriceRow = modelPanel.locator("#priceTableBody tr").filter({ hasText: "gpt-6-luna" });
+    assert.match(await gpt6PriceRow.innerText(), /\$0\.10[\s\S]*\$0\.01[\s\S]*\$0\.50/);
 
     attacker = await startAttackerPage(new URL("data.js", tokenBaseUrl).href);
     const page = await browser.newPage();

@@ -63,7 +63,7 @@ The project has two modes:
 
 ### Windows portable live dashboard (recommended)
 
-Regular users should download `CodexScope-Live-v0.4.0-Windows-x64.zip` and its matching `.sha256` file from [GitHub Releases](https://github.com/ChampionYuCheng/CodexScope-Live/releases). Do not use GitHub's automatically generated `Source code` archives.
+Regular users should download `CodexScope-Live-v0.5.0-Windows-x64.zip` and its matching `.sha256` file from [GitHub Releases](https://github.com/ChampionYuCheng/CodexScope-Live/releases). Do not use GitHub's automatically generated `Source code` archives.
 
 1. Extract the entire ZIP.
 2. Double-click `CodexScope-Live.exe`.
@@ -77,8 +77,8 @@ The bookmark-friendly address remains `http://127.0.0.1:48173/`. Each launch red
 Windows SmartScreen may report an unknown publisher because the executable is not commercially code-signed. Confirm that the download came from this repository's Release page and verify it against the matching `.sha256` file before running it:
 
 ~~~powershell
-Get-FileHash .\CodexScope-Live-v0.4.0-Windows-x64.zip -Algorithm SHA256
-Get-Content .\CodexScope-Live-v0.4.0-Windows-x64.zip.sha256
+Get-FileHash .\CodexScope-Live-v0.5.0-Windows-x64.zip -Algorithm SHA256
+Get-Content .\CodexScope-Live-v0.5.0-Windows-x64.zip.sha256
 ~~~
 
 The two hashes must match exactly.
@@ -193,7 +193,7 @@ npm.cmd run release:windows
 npm.cmd run check:release:windows
 ~~~
 
-The artifacts are written to `dist/CodexScope-Live-v0.4.0-Windows-x64.zip` and a matching `.sha256` file. The verifier extracts that final ZIP into a temporary directory, checks both executables are Windows x64, validates the checksum and GUI subsystem, runs a real JSONL fixture through the bundled generator, confirms private runtime data stays outside the app directory, checks that a cross-origin page cannot load `data.js`, and exercises the authenticated shutdown flow. The existing `npm run release:local` command remains available for the legacy cross-platform static-package flow.
+The artifacts are written to `dist/CodexScope-Live-v0.5.0-Windows-x64.zip` and a matching `.sha256` file. The verifier extracts that final ZIP into a temporary directory, checks both executables are Windows x64, validates the checksum and GUI subsystem, runs a real JSONL fixture through the bundled generator, confirms private runtime data stays outside the app directory, checks that a cross-origin page cannot load `data.js`, and exercises the authenticated shutdown flow. The existing `npm run release:local` command remains available for the legacy cross-platform static-package flow.
 
 ## Data flow
 
@@ -208,7 +208,7 @@ The generator does not export prompt text, assistant messages, tool output, or f
 
 ## Cost estimates
 
-The cost card is an estimate, not an official bill. It uses local token counts and model-pricing rules exported by the generator. USD is the source currency; CNY is a display conversion only.
+The cost card is an estimate, not an official bill. It uses local token counts and model-pricing rules exported by the generator. USD is the source currency; CNY is a display conversion only. The bundled catalog uses OpenAI's published Standard short-context API rates per 1M tokens, last checked on 2026-09-28, for GPT-6 Astra/Sol/Luna and GPT-5.6 Sol/Terra/Luna. OpenAI currently lists promotional pricing for GPT-5.6 Sol through at least 2026-11-21. The local Codex logs do not expose billable context length, cache-write tokens, or service tier, so these variations are not included; reasoning tokens use the model's output rate. Check the [official OpenAI pricing page](https://developers.openai.com/api/docs/pricing) for later price changes.
 
 When available, the dashboard retrieves the USD/CNY rate from the Frankfurter API using the ECB provider. If the request fails, it uses a bundled reference rate and marks the conversion as an offline fallback. Actual ChatGPT or Codex billing, credits, and quota status should be checked through the official account or billing page.
 

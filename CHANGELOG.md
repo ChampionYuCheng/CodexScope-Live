@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.5.0 - 2026-09-28
+
+- Added official GPT-6 Astra, Sol, and Luna Standard short-context API prices to the model cost estimates.
+- Corrected GPT-5.6 Sol, Terra, and Luna estimates so they no longer fall through to the generic GPT-5 price rule.
+- Rebuilds summaries when the pricing catalog changes while reusing cached parsed sessions.
+- Documented that GPT-5.6 Sol's current promotional price is listed through at least 2026-11-21.
+- Clarified that local Codex logs do not identify long-context billing, cache writes, or service-tier rates; displayed costs remain estimates, not account bills.
+- Updated the bilingual download instructions and package metadata to v0.5.0.
+
 ## v0.4.0 - 2026-08-31
 
 - Fixed mixed-model session attribution so the session list shows the latest in-range model and reasoning effort while retaining model and effort usage breakdowns.
