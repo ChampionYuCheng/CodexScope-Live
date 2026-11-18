@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.6.0 - 2026-11-18
+
+- Added Standard short-context cost estimates for GPT-6.2 Astra/Sol and GPT-6.1 Sol/Terra. Earlier models retain their own rates when reviewing historical sessions.
+- Updated the pricing notes and Windows portable download instructions in both languages.
+
 ## v0.5.0 - 2026-09-28
 
 - Added official GPT-6 Astra, Sol, and Luna Standard short-context API prices to the model cost estimates.

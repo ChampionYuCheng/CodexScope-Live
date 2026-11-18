@@ -3,6 +3,10 @@ window.CODEXSCOPE_SAMPLE_DATA = {
   generatedAt: "2026-05-09 00:16:00",
   windowDays: 30,
   pricingRules: [
+    { label: "gpt-6.2-astra", patterns: ["gpt-6.2-astra", "gpt_6.2_astra", "gpt 6.2 astra"], input: 8, cached: 0.4, output: 40 },
+    { label: "gpt-6.2-sol", patterns: ["gpt-6.2-sol", "gpt_6.2_sol", "gpt 6.2 sol"], input: 2, cached: 0.1, output: 10 },
+    { label: "gpt-6.1-sol", patterns: ["gpt-6.1-sol", "gpt_6.1_sol", "gpt 6.1 sol"], input: 2, cached: 0.1, output: 10 },
+    { label: "gpt-6.1-terra", patterns: ["gpt-6.1-terra", "gpt_6.1_terra", "gpt 6.1 terra"], input: 1, cached: 0.05, output: 5 },
     { label: "gpt-6-astra", patterns: ["gpt-6-astra", "gpt_6_astra", "gpt 6 astra"], input: 10.00, cached: 1.00, output: 50.00 },
     { label: "gpt-6-sol", patterns: ["gpt-6-sol", "gpt_6_sol", "gpt 6 sol"], input: 2.00, cached: 0.20, output: 10.00 },
     { label: "gpt-6-luna", patterns: ["gpt-6-luna", "gpt_6_luna", "gpt 6 luna"], input: 0.10, cached: 0.01, output: 0.50 },

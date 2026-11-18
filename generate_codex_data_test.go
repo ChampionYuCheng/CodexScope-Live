@@ -303,6 +303,10 @@ func TestNewModelPricingMatchesStandardShortContextRates(t *testing.T) {
 		wantTotal             float64
 	}{
 		{model: "gpt-6-astra", input: 10, cached: 1, output: 50, wantTotal: 27.75},
+		{model: "gpt-6.2-astra", input: 8, cached: 0.4, output: 40, wantTotal: 22.1},
+		{model: "gpt-6.2-sol", input: 2, cached: 0.1, output: 10, wantTotal: 5.525},
+		{model: "gpt-6.1-sol", input: 2, cached: 0.1, output: 10, wantTotal: 5.525},
+		{model: "gpt-6.1-terra", input: 1, cached: 0.05, output: 5, wantTotal: 2.7625},
 		{model: "gpt-6-sol", input: 2, cached: 0.2, output: 10, wantTotal: 5.55},
 		{model: "gpt-6-luna", input: 0.1, cached: 0.01, output: 0.5, wantTotal: 0.2775},
 		{model: "gpt-5.6-sol", input: 4, cached: 0.4, output: 20, wantTotal: 11.1},
